@@ -1970,8 +1970,8 @@ libconn_diag.so:
 		fi \
 	done
 ifeq ($(HND_ROUTER_AX),y)
-	$(LD) -L$(TOP_PLATFORM)/nvram -lnvram -Wl,-rpath=$(STAGEDIR)/usr/lib -Wl,-rpath-link=$(STAGEDIR)/usr/lib -L$(TOP)/shared -lshared -shared $(if $(RTCONFIG_BCM_502L07P2),-L$(TOP_PLATFORM)/ethctl_lib -lethctl) -o $@ $(DIAG_OBJS)
+	$(LD) -L$(TOP_PLATFORM)/nvram -lnvram -Wl,-rpath-link=$(STAGEDIR)/usr/lib -L$(TOP)/shared -lshared -shared $(if $(RTCONFIG_BCM_502L07P2),-L$(TOP_PLATFORM)/ethctl_lib -lethctl) -o $@ $(DIAG_OBJS)
 else
-	$(LD) -L$(TOP)/nvram${BCMEX}${EX7} -lnvram -Wl,-rpath=$(STAGEDIR)/usr/lib -Wl,-rpath-link=$(STAGEDIR)/usr/lib -L$(TOP)/shared -lshared -shared -o $@ $(DIAG_OBJS)
+	$(LD) -L$(TOP)/nvram${BCMEX}${EX7} -lnvram -Wl,-rpath-link=$(STAGEDIR)/usr/lib -L$(TOP)/shared -lshared -shared -o $@ $(DIAG_OBJS)
 endif
 endif
