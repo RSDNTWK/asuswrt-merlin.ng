@@ -6750,7 +6750,7 @@ curl/Makefile: curl/configure
 		CFLAGS="$(if $(RTCONFIG_DEBUG),-g,-Os) -Wall -ffunction-sections -fdata-sections" \
 		CPPFLAGS="-I$(STAGEDIR)/usr/include" \
 		comma="," \
-		LDFLAGS="-L$(SRCBASE)/router/openssl-1.1" \
+		LDFLAGS="-L$(SRCBASE)/router/openssl-1.1 -L$(STAGEDIR)/usr/lib" \
 		LIBS="-ldl -lpthread -lcrypto -lssl"
 
 curl: $(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),openssl,) $(if $(RTCONFIG_TR069),libssh2,) $(if $(RTCONFIG_MBEDTLS),mbedtls,) $(if $(RTCONFIG_WOLFSSL),wolfssl,) curl/Makefile
