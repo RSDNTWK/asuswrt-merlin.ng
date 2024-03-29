@@ -6746,9 +6746,9 @@ curl/Makefile: curl/configure
 		--disable-threaded-resolver --disable-ntlm-wb \
 		--disable-doh --disable-netrc --disable-dnsshuffle \
 		--with-ssl=$./openssl-1.1 --with-ca-fallback --without-ssl \
-		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
+		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt -I./openssl-1.1/include \
 		CFLAGS="$(if $(RTCONFIG_DEBUG),-g,-Os) -Wall -ffunction-sections -fdata-sections" \
-		CPPFLAGS="-I./openssl-1.1/include" \
+		CPPFLAGS="-I$(STAGEDIR)/usr/include" \
 		comma="," \
 		LDFLAGS="-L$./openssl-1.1" \
 		LIBS="-ldl -lpthread -lcrypto -lssl"
