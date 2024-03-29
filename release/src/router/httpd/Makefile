@@ -296,7 +296,7 @@ endif
 
 ifeq ($(RTCONFIG_LETSENCRYPT),y)
 CFLAGS  += -I$(TOP)/libletsencrypt
-LIBS += -L$(TOP)/libletsencrypt -lletsencrypt
+LIBS += -L$(TOP)/libletsencrypt -lletsencrypt -L$(TOP)/openssl-1.1 -lssl -lcrypto -ldl
 endif
 
 ifeq ($(RTCONFIG_PERMISSION_MANAGEMENT),y)
