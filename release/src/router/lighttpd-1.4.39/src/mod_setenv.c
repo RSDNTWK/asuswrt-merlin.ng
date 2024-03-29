@@ -1,251 +1,301 @@
-#include "base.h"
-#include "log.h"
+#include "first.h"
+
+#include "array.h"
 #include "buffer.h"
-
+#include "log.h"
+#include "http_header.h"
 #include "plugin.h"
-
-#include "response.h"
+#include "request.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-/* plugin config for all request/connections */
-
 typedef struct {
-	int handled; /* make sure that we only apply the headers once */
-} handler_ctx;
-
-typedef struct {
-	array *request_header;
-	array *response_header;
-
-	array *environment;
+    const array *request_header;
+    const array *set_request_header;
+    const array *response_header;
+    const array *set_response_header;
+    const array *environment;
+    const array *set_environment;
 } plugin_config;
 
 typedef struct {
-	PLUGIN_DATA;
-
-	plugin_config **config_storage;
-
-	plugin_config conf;
+    PLUGIN_DATA;
+    plugin_config defaults;
+    plugin_config conf;
 } plugin_data;
 
+typedef struct {
+    int handled; /* make sure that we only apply the headers once */
+    plugin_config conf;
+} handler_ctx;
+
+__attribute_malloc__
+__attribute_returns_nonnull__
 static handler_ctx * handler_ctx_init(void) {
-	handler_ctx * hctx;
-
-	hctx = calloc(1, sizeof(*hctx));
-
-	hctx->handled = 0;
-
-	return hctx;
+    return ck_calloc(1, sizeof(handler_ctx));
 }
 
 static void handler_ctx_free(handler_ctx *hctx) {
-	free(hctx);
+    free(hctx);
 }
 
-
-/* init the plugin data */
 INIT_FUNC(mod_setenv_init) {
-	plugin_data *p;
-
-	p = calloc(1, sizeof(*p));
-
-	return p;
+    return ck_calloc(1, sizeof(plugin_data));
 }
 
-/* detroy the plugin data */
-FREE_FUNC(mod_setenv_free) {
-	plugin_data *p = p_d;
-
-	UNUSED(srv);
-
-	if (!p) return HANDLER_GO_ON;
-
-	if (p->config_storage) {
-		size_t i;
-		for (i = 0; i < srv->config_context->used; i++) {
-			plugin_config *s = p->config_storage[i];
-
-			if (NULL == s) continue;
-
-			array_free(s->request_header);
-			array_free(s->response_header);
-			array_free(s->environment);
-
-			free(s);
-		}
-		free(p->config_storage);
-	}
-
-	free(p);
-
-	return HANDLER_GO_ON;
+static void mod_setenv_merge_config_cpv(plugin_config * const pconf, const config_plugin_value_t * const cpv) {
+    switch (cpv->k_id) { /* index into static config_plugin_keys_t cpk[] */
+      case 0: /* setenv.add-request-header */
+        pconf->request_header = cpv->v.a;
+        break;
+      case 1: /* setenv.add-response-header */
+        pconf->response_header = cpv->v.a;
+        break;
+      case 2: /* setenv.add-environment */
+        pconf->environment = cpv->v.a;
+        break;
+      case 3: /* setenv.set-request-header */
+        pconf->set_request_header = cpv->v.a;
+        break;
+      case 4: /* setenv.set-response-header */
+        pconf->set_response_header = cpv->v.a;
+        break;
+      case 5: /* setenv.set-environment */
+        pconf->set_environment = cpv->v.a;
+        break;
+      default:/* should not happen */
+        return;
+    }
 }
 
-/* handle plugin config and check values */
+static void mod_setenv_merge_config(plugin_config * const pconf, const config_plugin_value_t *cpv) {
+    do {
+        mod_setenv_merge_config_cpv(pconf, cpv);
+    } while ((++cpv)->k_id != -1);
+}
+
+static void mod_setenv_patch_config(request_st * const r, plugin_data * const p, plugin_config * const pconf) {
+    memcpy(pconf, &p->defaults, sizeof(plugin_config));
+    for (int i = 1, used = p->nconfig; i < used; ++i) {
+        if (config_check_cond(r, (uint32_t)p->cvlist[i].k_id))
+            mod_setenv_merge_config(pconf, p->cvlist + p->cvlist[i].v.u2[0]);
+    }
+}
+
+static void mod_setenv_prep_ext (const array * const ac) {
+    array *a;
+    *(const array **)&a = ac;
+    for (uint32_t i = 0; i < a->used; ++i) {
+        data_string * const ds = (data_string *)a->data[i];
+        ds->ext = http_header_hkey_get(BUF_PTR_LEN(&ds->key));
+        /*(convenience: assume list, remove line ends, if line ends after ',')*/
+        for (char *s = ds->value.ptr; (s = strchr(s, ',')); ++s) {
+            if (s[1] == '\r') *++s = ' ';
+            if (s[1] == '\n') *++s = ' ';
+        }
+        /*(strip trailing and leading whitespace)*/
+        const char *s = ds->value.ptr;
+        uint32_t n = buffer_clen(&ds->value);
+        while (n-- && (s[n]==' ' || s[n]=='\t' || s[n]=='\r' || s[n]=='\n')) ;
+        buffer_truncate(&ds->value, ++n);
+        s = ds->value.ptr;
+        while (*s==' ' || *s=='\t' || *s=='\r' || *s=='\n') ++s;
+        if (s != ds->value.ptr) {
+            n -= (uint32_t)(s - ds->value.ptr);
+            memmove(ds->value.ptr, s, n);
+            buffer_truncate(&ds->value, n);
+        }
+        /*(warning if value contains '\r' or '\n';
+         * invalid in HTTP/2 and in updated HTTP/1.1 specs)*/
+        s = ds->value.ptr;
+        if (NULL != strchr(s, '\r') || NULL != strchr(s, '\n')) {
+            log_warn(NULL, __FILE__, __LINE__,
+               "WARNING: setenv.*-header contains CR and/or NL (invalid): "
+               "%s: %s", ds->key.ptr, s);
+            log_warn(NULL, __FILE__, __LINE__,
+              "Use mod_magnet for finer control of request, response headers.");
+        }
+    }
+}
 
 SETDEFAULTS_FUNC(mod_setenv_set_defaults) {
-	plugin_data *p = p_d;
-	size_t i = 0;
+    static const config_plugin_keys_t cpk[] = {
+      { CONST_STR_LEN("setenv.add-request-header"),
+        T_CONFIG_ARRAY_KVSTRING,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ CONST_STR_LEN("setenv.add-response-header"),
+        T_CONFIG_ARRAY_KVSTRING,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ CONST_STR_LEN("setenv.add-environment"),
+        T_CONFIG_ARRAY_KVSTRING,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ CONST_STR_LEN("setenv.set-request-header"),
+        T_CONFIG_ARRAY_KVSTRING,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ CONST_STR_LEN("setenv.set-response-header"),
+        T_CONFIG_ARRAY_KVSTRING,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ CONST_STR_LEN("setenv.set-environment"),
+        T_CONFIG_ARRAY_KVSTRING,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ NULL, 0,
+        T_CONFIG_UNSET,
+        T_CONFIG_SCOPE_UNSET }
+    };
 
-	config_values_t cv[] = {
-		{ "setenv.add-request-header",  NULL, T_CONFIG_ARRAY, T_CONFIG_SCOPE_CONNECTION },       /* 0 */
-		{ "setenv.add-response-header", NULL, T_CONFIG_ARRAY, T_CONFIG_SCOPE_CONNECTION },       /* 1 */
-		{ "setenv.add-environment",     NULL, T_CONFIG_ARRAY, T_CONFIG_SCOPE_CONNECTION },       /* 2 */
-		{ NULL,                         NULL, T_CONFIG_UNSET, T_CONFIG_SCOPE_UNSET }
-	};
+    plugin_data * const p = p_d;
+    if (!config_plugin_values_init(srv, p, cpk, "mod_setenv"))
+        return HANDLER_ERROR;
 
-	if (!p) return HANDLER_ERROR;
+    /* process and validate config directives
+     * (init i to 0 if global context; to 1 to skip empty global context) */
+    for (int i = !p->cvlist[0].v.u2[1]; i < p->nconfig; ++i) {
+        const config_plugin_value_t *cpv = p->cvlist + p->cvlist[i].v.u2[0];
+        for (; -1 != cpv->k_id; ++cpv) {
+            switch (cpv->k_id) {
+              case 0: /* setenv.add-request-header */
+              case 1: /* setenv.add-response-header */
+                mod_setenv_prep_ext(cpv->v.a);
+                break;
+              case 2: /* setenv.add-environment */
+                break;
+              case 3: /* setenv.set-request-header */
+              case 4: /* setenv.set-response-header */
+                mod_setenv_prep_ext(cpv->v.a);
+                break;
+              case 5: /* setenv.set-environment */
+                break;
+              default:/* should not happen */
+                break;
+            }
+        }
+    }
 
-	p->config_storage = calloc(1, srv->config_context->used * sizeof(plugin_config *));
+    /* initialize p->defaults from global config context */
+    if (p->nconfig > 0 && p->cvlist->v.u2[1]) {
+        const config_plugin_value_t *cpv = p->cvlist + p->cvlist->v.u2[0];
+        if (-1 != cpv->k_id)
+            mod_setenv_merge_config(&p->defaults, cpv);
+    }
 
-	for (i = 0; i < srv->config_context->used; i++) {
-		data_config const* config = (data_config const*)srv->config_context->data[i];
-		plugin_config *s;
-
-		s = calloc(1, sizeof(plugin_config));
-		s->request_header   = array_init();
-		s->response_header  = array_init();
-		s->environment      = array_init();
-
-		cv[0].destination = s->request_header;
-		cv[1].destination = s->response_header;
-		cv[2].destination = s->environment;
-
-		p->config_storage[i] = s;
-
-		if (0 != config_insert_values_global(srv, config->value, cv, i == 0 ? T_CONFIG_SCOPE_SERVER : T_CONFIG_SCOPE_CONNECTION)) {
-			return HANDLER_ERROR;
-		}
-	}
-
-	return HANDLER_GO_ON;
+    return HANDLER_GO_ON;
 }
-
-#define PATCH(x) \
-	p->conf.x = s->x;
-static int mod_setenv_patch_connection(server *srv, connection *con, plugin_data *p) {
-	size_t i, j;
-	plugin_config *s = p->config_storage[0];
-
-	PATCH(request_header);
-	PATCH(response_header);
-	PATCH(environment);
-
-	/* skip the first, the global context */
-	for (i = 1; i < srv->config_context->used; i++) {
-		data_config *dc = (data_config *)srv->config_context->data[i];
-		s = p->config_storage[i];
-
-		/* condition didn't match */
-		if (!config_check_cond(srv, con, dc)) continue;
-
-		/* merge config */
-		for (j = 0; j < dc->value->used; j++) {
-			data_unset *du = dc->value->data[j];
-
-			if (buffer_is_equal_string(du->key, CONST_STR_LEN("setenv.add-request-header"))) {
-				PATCH(request_header);
-			} else if (buffer_is_equal_string(du->key, CONST_STR_LEN("setenv.add-response-header"))) {
-				PATCH(response_header);
-			} else if (buffer_is_equal_string(du->key, CONST_STR_LEN("setenv.add-environment"))) {
-				PATCH(environment);
-			}
-		}
-	}
-
-	return 0;
-}
-#undef PATCH
 
 URIHANDLER_FUNC(mod_setenv_uri_handler) {
-	plugin_data *p = p_d;
-	size_t k;
-	handler_ctx *hctx;
+    plugin_data *p = p_d;
+    handler_ctx *hctx = r->plugin_ctx[p->id];
+    if (!hctx)
+        r->plugin_ctx[p->id] = hctx = handler_ctx_init();
+    else if (hctx->handled)
+        return HANDLER_GO_ON;
+    hctx->handled = 1;
 
-	if (con->plugin_ctx[p->id]) {
-		hctx = con->plugin_ctx[p->id];
-	} else {
-		hctx = handler_ctx_init();
+    mod_setenv_patch_config(r, p, &hctx->conf);
 
-		con->plugin_ctx[p->id] = hctx;
-	}
+    const array * const aa = hctx->conf.request_header;
+    const array * const as = hctx->conf.set_request_header;
 
-	if (hctx->handled) {
-		return HANDLER_GO_ON;
-	}
+    if (aa) {
+        for (uint32_t k = 0; k < aa->used; ++k) {
+            const data_string * const ds = (const data_string *)aa->data[k];
+            http_header_request_append(r, ds->ext, BUF_PTR_LEN(&ds->key),
+                                                   BUF_PTR_LEN(&ds->value));
+        }
+    }
 
-	hctx->handled = 1;
+    if (as) {
+        for (uint32_t k = 0; k < as->used; ++k) {
+            const data_string * const ds = (const data_string *)as->data[k];
+            !buffer_is_blank(&ds->value)
+              ? http_header_request_set(r, ds->ext, BUF_PTR_LEN(&ds->key),
+                                                    BUF_PTR_LEN(&ds->value))
+              : http_header_request_unset(r, ds->ext, BUF_PTR_LEN(&ds->key));
+        }
+    }
 
-	mod_setenv_patch_connection(srv, con, p);
-
-	for (k = 0; k < p->conf.request_header->used; k++) {
-		data_string *ds = (data_string *)p->conf.request_header->data[k];
-		data_string *ds_dst;
-
-		if (NULL == (ds_dst = (data_string *)array_get_unused_element(con->request.headers, TYPE_STRING))) {
-			ds_dst = data_string_init();
-		}
-
-		buffer_copy_buffer(ds_dst->key, ds->key);
-		buffer_copy_buffer(ds_dst->value, ds->value);
-
-		array_insert_unique(con->request.headers, (data_unset *)ds_dst);
-	}
-
-	for (k = 0; k < p->conf.environment->used; k++) {
-		data_string *ds = (data_string *)p->conf.environment->data[k];
-		data_string *ds_dst;
-
-		if (NULL == (ds_dst = (data_string *)array_get_unused_element(con->environment, TYPE_STRING))) {
-			ds_dst = data_string_init();
-		}
-
-		buffer_copy_buffer(ds_dst->key, ds->key);
-		buffer_copy_buffer(ds_dst->value, ds->value);
-
-		array_insert_unique(con->environment, (data_unset *)ds_dst);
-	}
-
-	for (k = 0; k < p->conf.response_header->used; k++) {
-		data_string *ds = (data_string *)p->conf.response_header->data[k];
-
-		response_header_insert(srv, con, CONST_BUF_LEN(ds->key), CONST_BUF_LEN(ds->value));
-	}
-
-	/* not found */
-	return HANDLER_GO_ON;
+    return HANDLER_GO_ON;
 }
 
-CONNECTION_FUNC(mod_setenv_reset) {
-	plugin_data *p = p_d;
+REQUEST_FUNC(mod_setenv_handle_request_env) {
+    plugin_data *p = p_d;
+    handler_ctx *hctx = r->plugin_ctx[p->id];
+    if (NULL == hctx) return HANDLER_GO_ON;
+    if (hctx->handled > 1) return HANDLER_GO_ON;
+    hctx->handled = 2;
 
-	UNUSED(srv);
+    const array * const aa = hctx->conf.environment;
+    const array * const as = hctx->conf.set_environment;
 
-	if (con->plugin_ctx[p->id]) {
-		handler_ctx_free(con->plugin_ctx[p->id]);
-		con->plugin_ctx[p->id] = NULL;
-	}
+    if (aa) {
+        for (uint32_t k = 0; k < aa->used; ++k) {
+            const data_string * const ds = (const data_string *)aa->data[k];
+            http_header_env_append(r, BUF_PTR_LEN(&ds->key),
+                                      BUF_PTR_LEN(&ds->value));
+        }
+    }
 
-	return HANDLER_GO_ON;
+    if (as) {
+        for (uint32_t k = 0; k < as->used; ++k) {
+            const data_string * const ds = (const data_string *)as->data[k];
+            http_header_env_set(r, BUF_PTR_LEN(&ds->key),
+                                   BUF_PTR_LEN(&ds->value));
+        }
+    }
+
+    return HANDLER_GO_ON;
 }
 
-/* this function is called at dlopen() time and inits the callbacks */
+REQUEST_FUNC(mod_setenv_handle_response_start) {
+    plugin_data *p = p_d;
+    handler_ctx *hctx = r->plugin_ctx[p->id];
+    if (NULL == hctx) return HANDLER_GO_ON;
 
+    const array * const aa = hctx->conf.response_header;
+    const array * const as = hctx->conf.set_response_header;
+
+    if (aa) {
+        for (uint32_t k = 0; k < aa->used; ++k) {
+            const data_string * const ds = (const data_string *)aa->data[k];
+            http_header_response_insert(r, ds->ext, BUF_PTR_LEN(&ds->key),
+                                                    BUF_PTR_LEN(&ds->value));
+        }
+    }
+
+    if (as) {
+        for (uint32_t k = 0; k < as->used; ++k) {
+            const data_string * const ds = (const data_string *)as->data[k];
+            !buffer_is_blank(&ds->value)
+              ? http_header_response_set(r, ds->ext, BUF_PTR_LEN(&ds->key),
+                                                     BUF_PTR_LEN(&ds->value))
+              : http_header_response_unset(r, ds->ext, BUF_PTR_LEN(&ds->key));
+        }
+    }
+
+    return HANDLER_GO_ON;
+}
+
+REQUEST_FUNC(mod_setenv_handle_request_reset) {
+    void ** const hctx = r->plugin_ctx+((plugin_data_base *)p_d)->id;
+    if (*hctx) { handler_ctx_free(*hctx); *hctx = NULL; }
+    return HANDLER_GO_ON;
+}
+
+
+__attribute_cold__
+__declspec_dllexport__
 int mod_setenv_plugin_init(plugin *p);
 int mod_setenv_plugin_init(plugin *p) {
 	p->version     = LIGHTTPD_VERSION_ID;
-	p->name        = buffer_init_string("setenv");
+	p->name        = "setenv";
 
 	p->init        = mod_setenv_init;
+	p->set_defaults= mod_setenv_set_defaults;
 	p->handle_uri_clean  = mod_setenv_uri_handler;
-	p->set_defaults  = mod_setenv_set_defaults;
-	p->cleanup     = mod_setenv_free;
+	p->handle_request_env    = mod_setenv_handle_request_env;
+	p->handle_response_start = mod_setenv_handle_response_start;
+	p->handle_request_reset  = mod_setenv_handle_request_reset;
 
-	p->connection_reset  = mod_setenv_reset;
-
-	p->data        = NULL;
 
 	return 0;
 }

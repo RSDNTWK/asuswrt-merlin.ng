@@ -1,292 +1,221 @@
+#include "first.h"
+
 #include "base.h"
+#include "keyvalue.h"
 #include "log.h"
 #include "buffer.h"
+#include "burl.h"
+#include "http_header.h"
+#include "http_kv.h"    /* http_method_get_or_head() */
 
 #include "plugin.h"
-#include "response.h"
 
-#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct {
-	pcre_keyvalue_buffer *redirect;
-	data_config *context; /* to which apply me */
-
-	unsigned short redirect_code;
+    pcre_keyvalue_buffer *redirect;
+    int redirect_code;
 } plugin_config;
 
 typedef struct {
-	PLUGIN_DATA;
-	buffer *match_buf;
-	buffer *location;
-
-	plugin_config **config_storage;
-
-	plugin_config conf;
+    PLUGIN_DATA;
+    plugin_config defaults;
+    plugin_config conf;
 } plugin_data;
 
 INIT_FUNC(mod_redirect_init) {
-	plugin_data *p;
-	
-	p = calloc(1, sizeof(*p));
-
-	p->match_buf = buffer_init();
-	p->location = buffer_init();
-
-	return p;
+    return ck_calloc(1, sizeof(plugin_data));
 }
 
 FREE_FUNC(mod_redirect_free) {
-	plugin_data *p = p_d;
+    plugin_data * const p = p_d;
+    if (NULL == p->cvlist) return;
+    /* (init i to 0 if global context; to 1 to skip empty global context) */
+    for (int i = !p->cvlist[0].v.u2[1], used = p->nconfig; i < used; ++i) {
+        config_plugin_value_t *cpv = p->cvlist + p->cvlist[i].v.u2[0];
+        for (; -1 != cpv->k_id; ++cpv) {
+            switch (cpv->k_id) {
+              case 0: /* url.redirect */
+                if (cpv->vtype == T_CONFIG_LOCAL)
+                    pcre_keyvalue_buffer_free(cpv->v.v);
+                break;
+              default:
+                break;
+            }
+        }
+    }
+}
 
-	if (!p) return HANDLER_GO_ON;
+static void mod_redirect_merge_config_cpv(plugin_config * const pconf, const config_plugin_value_t * const cpv) {
+    switch (cpv->k_id) { /* index into static config_plugin_keys_t cpk[] */
+      case 0: /* url.redirect */
+        if (cpv->vtype == T_CONFIG_LOCAL)
+            pconf->redirect = cpv->v.v;
+        break;
+      case 1: /* url.redirect-code */
+        pconf->redirect_code = cpv->v.shrt;
+        break;
+      default:/* should not happen */
+        return;
+    }
+}
 
-	if (p->config_storage) {
-		size_t i;
-		for (i = 0; i < srv->config_context->used; i++) {
-			plugin_config *s = p->config_storage[i];
+static void mod_redirect_merge_config(plugin_config * const pconf, const config_plugin_value_t *cpv) {
+    do {
+        mod_redirect_merge_config_cpv(pconf, cpv);
+    } while ((++cpv)->k_id != -1);
+}
 
-			if (NULL == s) continue;
+static void mod_redirect_patch_config(request_st * const r, plugin_data * const p) {
+    p->conf = p->defaults; /* copy small struct instead of memcpy() */
+    /*memcpy(&p->conf, &p->defaults, sizeof(plugin_config));*/
+    for (int i = 1, used = p->nconfig; i < used; ++i) {
+        if (config_check_cond(r, (uint32_t)p->cvlist[i].k_id))
+            mod_redirect_merge_config(&p->conf, p->cvlist+p->cvlist[i].v.u2[0]);
+    }
+}
 
-			pcre_keyvalue_buffer_free(s->redirect);
-
-			free(s);
-		}
-		free(p->config_storage);
-	}
-
-
-	buffer_free(p->match_buf);
-	buffer_free(p->location);
-
-	free(p);
-
-	return HANDLER_GO_ON;
+static pcre_keyvalue_buffer * mod_redirect_parse_list(server *srv, const array *a, const int condidx) {
+    const int pcre_jit = config_feature_bool(srv, "server.pcre_jit", 1);
+    pcre_keyvalue_buffer * const kvb = pcre_keyvalue_buffer_init();
+    kvb->cfgidx = condidx;
+    buffer * const tb = srv->tmp_buf;
+    int percent = 0;
+    for (uint32_t j = 0; j < a->used; ++j) {
+        data_string *ds = (data_string *)a->data[j];
+        if (srv->srvconf.http_url_normalize) {
+            pcre_keyvalue_burl_normalize_key(&ds->key, tb);
+            pcre_keyvalue_burl_normalize_value(&ds->value, tb);
+        }
+        for (const char *s = ds->value.ptr; (s = strchr(s, '%')); ++s) {
+            if (s[1] == '%')
+                ++s;
+            else if (light_isdigit(s[1]) || s[1] == '{') {
+                percent |= 1;
+                break;
+            }
+        }
+        if (!pcre_keyvalue_buffer_append(srv->errh, kvb, &ds->key, &ds->value,
+                                         pcre_jit)) {
+            log_error(srv->errh, __FILE__, __LINE__,
+              "pcre-compile failed for %s", ds->key.ptr);
+            pcre_keyvalue_buffer_free(kvb);
+            return NULL;
+        }
+    }
+    if (percent)
+        kvb->x0 = config_capture(srv, condidx);
+    return kvb;
 }
 
 SETDEFAULTS_FUNC(mod_redirect_set_defaults) {
-	plugin_data *p = p_d;
-	size_t i = 0;
-	
-	config_values_t cv[] = {
-		{ "url.redirect",               NULL, T_CONFIG_LOCAL, T_CONFIG_SCOPE_CONNECTION }, /* 0 */
-		{ "url.redirect-code",          NULL, T_CONFIG_SHORT, T_CONFIG_SCOPE_CONNECTION }, /* 1 */
-		{ NULL,                         NULL, T_CONFIG_UNSET, T_CONFIG_SCOPE_UNSET }
-	};
+    static const config_plugin_keys_t cpk[] = {
+      { CONST_STR_LEN("url.redirect"),
+        T_CONFIG_ARRAY_KVSTRING,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ CONST_STR_LEN("url.redirect-code"),
+        T_CONFIG_SHORT,
+        T_CONFIG_SCOPE_CONNECTION }
+     ,{ NULL, 0,
+        T_CONFIG_UNSET,
+        T_CONFIG_SCOPE_UNSET }
+    };
 
-	if (!p) return HANDLER_ERROR;
+    plugin_data * const p = p_d;
+    if (!config_plugin_values_init(srv, p, cpk, "mod_redirect"))
+        return HANDLER_ERROR;
 
-	/* 0 */
-	p->config_storage = calloc(1, srv->config_context->used * sizeof(plugin_config *));
+    /* process and validate config directives
+     * (init i to 0 if global context; to 1 to skip empty global context) */
+    for (int i = !p->cvlist[0].v.u2[1]; i < p->nconfig; ++i) {
+        config_plugin_value_t *cpv = p->cvlist + p->cvlist[i].v.u2[0];
+        for (; -1 != cpv->k_id; ++cpv) {
+            switch (cpv->k_id) {
+              case 0: /* url.redirect */
+                cpv->v.v =
+                  mod_redirect_parse_list(srv, cpv->v.a, p->cvlist[i].k_id);
+                if (NULL == cpv->v.v) return HANDLER_ERROR;
+                cpv->vtype = T_CONFIG_LOCAL;
+                break;
+              case 1: /* url.redirect-code */
+		if (cpv->v.shrt < 100 || cpv->v.shrt >= 1000) cpv->v.shrt = 0;
+                break;
+              default:/* should not happen */
+                break;
+            }
+        }
+    }
 
-	for (i = 0; i < srv->config_context->used; i++) {
-		data_config const* config = (data_config const*)srv->config_context->data[i];
-		plugin_config *s;
-		size_t j;
-		data_unset *du;
-		data_array *da;
+    /* initialize p->defaults from global config context */
+    if (p->nconfig > 0 && p->cvlist->v.u2[1]) {
+        const config_plugin_value_t *cpv = p->cvlist + p->cvlist->v.u2[0];
+        if (-1 != cpv->k_id)
+            mod_redirect_merge_config(&p->defaults, cpv);
+    }
 
-		s = calloc(1, sizeof(plugin_config));
-		s->redirect   = pcre_keyvalue_buffer_init();
-		s->redirect_code = 301;
-
-		cv[0].destination = s->redirect;
-		cv[1].destination = &(s->redirect_code);
-
-		p->config_storage[i] = s;
-
-		if (0 != config_insert_values_global(srv, config->value, cv, i == 0 ? T_CONFIG_SCOPE_SERVER : T_CONFIG_SCOPE_CONNECTION)) {
-			return HANDLER_ERROR;
-		}
-
-		if (NULL == (du = array_get_element(config->value, "url.redirect"))) {
-			/* no url.redirect defined */
-			continue;
-		}
-
-		if (du->type != TYPE_ARRAY) {
-			log_error_write(srv, __FILE__, __LINE__, "sss",
-					"unexpected type for key: ", "url.redirect", "array of strings");
-
-			return HANDLER_ERROR;
-		}
-
-		da = (data_array *)du;
-
-		for (j = 0; j < da->value->used; j++) {
-			if (da->value->data[j]->type != TYPE_STRING) {
-				log_error_write(srv, __FILE__, __LINE__, "sssbs",
-						"unexpected type for key: ",
-						"url.redirect",
-						"[", da->value->data[j]->key, "](string)");
-
-				return HANDLER_ERROR;
-			}
-
-			if (0 != pcre_keyvalue_buffer_append(srv, s->redirect,
-							     ((data_string *)(da->value->data[j]))->key->ptr,
-							     ((data_string *)(da->value->data[j]))->value->ptr)) {
-
-				log_error_write(srv, __FILE__, __LINE__, "sb",
-						"pcre-compile failed for", da->value->data[j]->key);
-				return HANDLER_ERROR;
-			}
-		}
-	}
-
-	return HANDLER_GO_ON;
+    return HANDLER_GO_ON;
 }
-#ifdef HAVE_PCRE_H
-static int mod_redirect_patch_connection(server *srv, connection *con, plugin_data *p) {
-	size_t i, j;
-	plugin_config *s = p->config_storage[0];
 
-	p->conf.redirect = s->redirect;
-	p->conf.redirect_code = s->redirect_code;
-	p->conf.context = NULL;
+URIHANDLER_FUNC(mod_redirect_uri_handler) {
+    plugin_data * const p = p_d;
+    struct burl_parts_t burl;
+    pcre_keyvalue_ctx ctx;
+    handler_t rc;
 
-	/* skip the first, the global context */
-	for (i = 1; i < srv->config_context->used; i++) {
-		data_config *dc = (data_config *)srv->config_context->data[i];
-		s = p->config_storage[i];
+    mod_redirect_patch_config(r, p);
+    if (!p->conf.redirect || !p->conf.redirect->used) return HANDLER_GO_ON;
 
-		/* condition didn't match */
-		if (!config_check_cond(srv, con, dc)) continue;
+    ctx.cache = NULL;
+    if (p->conf.redirect->x0) { /*(p->conf.redirect->x0 is capture_idx)*/
+        ctx.cache = r->cond_match[p->conf.redirect->x0 - 1];
+    }
+    ctx.burl = &burl;
+    burl.scheme    = &r->uri.scheme;
+    burl.authority = &r->uri.authority;
+    burl.port      = sock_addr_get_port(&r->con->srv_socket->addr);
+    burl.path      = &r->target; /*(uri-encoded and includes query-part)*/
+    burl.query     = &r->uri.query;
+    if (buffer_is_blank(burl.authority))
+        burl.authority = r->server_name;
 
-		/* merge config */
-		for (j = 0; j < dc->value->used; j++) {
-			data_unset *du = dc->value->data[j];
-
-			if (0 == strcmp(du->key->ptr, "url.redirect")) {
-				p->conf.redirect = s->redirect;
-				p->conf.context = dc;
-			} else if (0 == strcmp(du->key->ptr, "url.redirect-code")) {
-				p->conf.redirect_code = s->redirect_code;
-			}
-		}
-	}
-
-	return 0;
-}
-#endif
-static handler_t mod_redirect_uri_handler(server *srv, connection *con, void *p_data) {
-#ifdef HAVE_PCRE_H
-	plugin_data *p = p_data;
-	size_t i;
-
-	/*
-	 * REWRITE URL
-	 *
-	 * e.g. redirect /base/ to /index.php?section=base
-	 *
-	 */
-
-	mod_redirect_patch_connection(srv, con, p);
-
-	buffer_copy_buffer(p->match_buf, con->request.uri);
-
-	for (i = 0; i < p->conf.redirect->used; i++) {
-		pcre *match;
-		pcre_extra *extra;
-		const char *pattern;
-		size_t pattern_len;
-		int n;
-		pcre_keyvalue *kv = p->conf.redirect->kv[i];
-# define N 10
-		int ovec[N * 3];
-
-		match       = kv->key;
-		extra       = kv->key_extra;
-		pattern     = kv->value->ptr;
-		pattern_len = buffer_string_length(kv->value);
-
-		if ((n = pcre_exec(match, extra, CONST_BUF_LEN(p->match_buf), 0, 0, ovec, 3 * N)) < 0) {
-			if (n != PCRE_ERROR_NOMATCH) {
-				log_error_write(srv, __FILE__, __LINE__, "sd",
-						"execution error while matching: ", n);
-				return HANDLER_ERROR;
-			}
-		} else {
-			const char **list;
-			size_t start;
-			size_t k;
-
-			/* it matched */
-			pcre_get_substring_list(p->match_buf->ptr, ovec, n, &list);
-
-			/* search for $[0-9] */
-
-			buffer_reset(p->location);
-
-			start = 0;
-			for (k = 0; k + 1 < pattern_len; k++) {
-				if (pattern[k] == '$' || pattern[k] == '%') {
-					/* got one */
-
-					size_t num = pattern[k + 1] - '0';
-
-					buffer_append_string_len(p->location, pattern + start, k - start);
-
-					if (!isdigit((unsigned char)pattern[k + 1])) {
-						/* enable escape: "%%" => "%", "%a" => "%a", "$$" => "$" */
-						buffer_append_string_len(p->location, pattern+k, pattern[k] == pattern[k+1] ? 1 : 2);
-					} else if (pattern[k] == '$') {
-						/* n is always > 0 */
-						if (num < (size_t)n) {
-							buffer_append_string(p->location, list[num]);
-						}
-					} else if (p->conf.context == NULL) {
-						/* we have no context, we are global */
-						log_error_write(srv, __FILE__, __LINE__, "sb",
-								"used a rewrite containing a %[0-9]+ in the global scope, ignored:",
-								kv->value);
-					} else {
-						config_append_cond_match_buffer(con, p->conf.context, p->location, num);
-					}
-
-					k++;
-					start = k + 1;
-				}
-			}
-
-			buffer_append_string_len(p->location, pattern + start, pattern_len - start);
-
-			pcre_free(list);
-
-			response_header_insert(srv, con, CONST_STR_LEN("Location"), CONST_BUF_LEN(p->location));
-
-			con->http_status = p->conf.redirect_code > 99 && p->conf.redirect_code < 1000 ? p->conf.redirect_code : 301;
-			con->mode = DIRECT;
-			con->file_finished = 1;
-
-			return HANDLER_FINISHED;
-		}
-	}
-#undef N
-
-#else
-	UNUSED(srv);
-	UNUSED(con);
-	UNUSED(p_data);
-#endif
-
-	return HANDLER_GO_ON;
+    /* redirect URL on match
+     * e.g. redirect /base/ to /index.php?section=base
+     */
+    buffer * const tb = r->tmp_buf;
+    rc = pcre_keyvalue_buffer_process(p->conf.redirect, &ctx,
+                                      &r->target, tb);
+    if (HANDLER_FINISHED == rc) {
+        http_header_response_set(r, HTTP_HEADER_LOCATION,
+                                 CONST_STR_LEN("Location"),
+                                 BUF_PTR_LEN(tb));
+        r->http_status = p->conf.redirect_code
+                       ? p->conf.redirect_code
+                       : http_method_get_or_head(r->http_method)
+                         || r->http_version == HTTP_VERSION_1_0 ? 301 : 308;
+        r->handler_module = NULL;
+        r->resp_body_finished = 1;
+    }
+    else if (HANDLER_ERROR == rc) {
+        log_error(r->conf.errh, __FILE__, __LINE__,
+          "pcre_exec() error while processing uri: %s",
+          r->target.ptr);
+    }
+    return rc;
 }
 
 
+__attribute_cold__
+__declspec_dllexport__
 int mod_redirect_plugin_init(plugin *p);
 int mod_redirect_plugin_init(plugin *p) {
-	
 	p->version     = LIGHTTPD_VERSION_ID;
-	p->name        = buffer_init_string("redirect");
+	p->name        = "redirect";
 
 	p->init        = mod_redirect_init;
 	p->handle_uri_clean  = mod_redirect_uri_handler;
 	p->set_defaults  = mod_redirect_set_defaults;
 	p->cleanup     = mod_redirect_free;
-
-	p->data        = NULL;
 
 	return 0;
 }
