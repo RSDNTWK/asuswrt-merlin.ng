@@ -1,23 +1,13 @@
-#include "first.h"
-
 #include "base.h"
 #include "buffer.h"
 #include "array.h"
 #include "log.h"
-#include "http_header.h"
-#include "sock_addr.h"
-
-#undef __declspec_dllimport__
-#define __declspec_dllimport__  __declspec_dllexport__
-
-#include "configfile.h"
 #include "plugin.h"
 
-#include <string.h>
-#include <stdlib.h>     /* strtol */
+#include "configfile.h"
 
-__declspec_dllexport__
-array plugin_stats; /* global */
+#include <string.h>
+#include <stdlib.h>
 
 /**
  * like all glue code this file contains functions which
@@ -30,394 +20,216 @@ array plugin_stats; /* global */
  *
  */
 
-/* internal reference to srv->config_context array of (data_config *) */
-static struct {
-    const data_config * const *data; /* (srv->config_context->data) */
-    uint32_t used;                   /* (srv->config_context->used) */
-} config_reference;
 
+/* handle global options */
 
-void config_get_config_cond_info(config_cond_info * const cfginfo, uint32_t idx) {
-    const data_config * const dc = (data_config *)config_reference.data[idx];
-    cfginfo->comp = dc->comp;
-    cfginfo->cond = dc->cond;
-    cfginfo->string = &dc->string;
-    cfginfo->comp_key = dc->comp_key;
+/* parse config array */
+int config_insert_values_internal(server *srv, array *ca, const config_values_t cv[], config_scope_type_t scope) {
+	size_t i;
+	data_unset *du;
+
+	for (i = 0; cv[i].key; i++) {
+
+		if (NULL == (du = array_get_element(ca, cv[i].key))) {
+			/* no found */
+
+			continue;
+		}
+
+		if ((T_CONFIG_SCOPE_SERVER == cv[i].scope)
+		    && (T_CONFIG_SCOPE_SERVER != scope)) {
+			/* server scope options should only be set in server scope, not in conditionals */
+			log_error_write(srv, __FILE__, __LINE__, "ss",
+				"DEPRECATED: don't set server options in conditionals, variable:",
+				cv[i].key);
+		}
+		
+		switch (cv[i].type) {
+		case T_CONFIG_ARRAY:
+			if (du->type == TYPE_ARRAY) {
+				size_t j;
+				data_array *da = (data_array *)du;
+
+				for (j = 0; j < da->value->used; j++) {
+					if (da->value->data[j]->type == TYPE_STRING) {
+						data_string *ds = data_string_init();
+
+						buffer_copy_buffer(ds->value, ((data_string *)(da->value->data[j]))->value);
+						if (!da->is_index_key) {
+							/* the id's were generated automaticly, as we copy now we might have to renumber them
+							 * this is used to prepend server.modules by mod_indexfile as it has to be loaded
+							 * before mod_fastcgi and friends */
+							buffer_copy_buffer(ds->key, ((data_string *)(da->value->data[j]))->key);
+						}
+
+						array_insert_unique(cv[i].destination, (data_unset *)ds);
+					} else {
+						log_error_write(srv, __FILE__, __LINE__, "sssbsd",
+								"the value of an array can only be a string, variable:",
+								cv[i].key, "[", da->value->data[j]->key, "], type:", da->value->data[j]->type);
+
+						return -1;
+					}
+				}
+			} else {
+				log_error_write(srv, __FILE__, __LINE__, "ss", cv[i].key, "should have been a array of strings like ... = ( \"...\" )");
+
+				return -1;
+			}
+			break;
+		case T_CONFIG_STRING:
+			if (du->type == TYPE_STRING) {
+				data_string *ds = (data_string *)du;
+				buffer_copy_buffer(cv[i].destination, ds->value);
+			} else {
+				log_error_write(srv, __FILE__, __LINE__, "ssss", cv[i].key, "should have been a string like ... = \"...\"");
+
+				return -1;
+			}
+			break;
+		case T_CONFIG_SHORT:
+			switch(du->type) {
+			case TYPE_INTEGER: {
+				data_integer *di = (data_integer *)du;
+
+				*((unsigned short *)(cv[i].destination)) = di->value;
+				break;
+			}
+			case TYPE_STRING: {
+				data_string *ds = (data_string *)du;
+
+				/* If the value came from an environment variable, then it is a
+				 * data_string, although it may contain a number in ASCII
+				 * decimal format.  We try to interpret the string as a decimal
+				 * short before giving up, in order to support setting numeric
+				 * values with environment variables (eg, port number).
+				 */
+				if (ds->value->ptr && *ds->value->ptr) {
+					char *e;
+					long l = strtol(ds->value->ptr, &e, 10);
+					if (e != ds->value->ptr && !*e && l >=0 && l <= 65535) {
+						*((unsigned short *)(cv[i].destination)) = l;
+						break;
+					}
+				}
+
+				log_error_write(srv, __FILE__, __LINE__, "ssb", "got a string but expected a short:", cv[i].key, ds->value);
+
+				return -1;
+			}
+			default:
+				log_error_write(srv, __FILE__, __LINE__, "ssds", "unexpected type for key:", cv[i].key, du->type, "expected a short integer, range 0 ... 65535");
+				return -1;
+			}
+			break;
+		case T_CONFIG_INT:
+			switch(du->type) {
+			case TYPE_INTEGER: {
+				data_integer *di = (data_integer *)du;
+
+				*((unsigned int *)(cv[i].destination)) = di->value;
+				break;
+			}
+			case TYPE_STRING: {
+				data_string *ds = (data_string *)du;
+
+				if (ds->value->ptr && *ds->value->ptr) {
+					char *e;
+					long l = strtol(ds->value->ptr, &e, 10);
+					if (e != ds->value->ptr && !*e && l >= 0) {
+						*((unsigned int *)(cv[i].destination)) = l;
+						break;
+					}
+				}
+
+				log_error_write(srv, __FILE__, __LINE__, "ssb", "got a string but expected an integer:", cv[i].key, ds->value);
+
+				return -1;
+			}
+			default:
+				log_error_write(srv, __FILE__, __LINE__, "ssds", "unexpected type for key:", cv[i].key, du->type, "expected an integer, range 0 ... 4294967295");
+				return -1;
+			}
+			break;
+		case T_CONFIG_BOOLEAN:
+			if (du->type == TYPE_STRING) {
+				data_string *ds = (data_string *)du;
+
+				if (buffer_is_equal_string(ds->value, CONST_STR_LEN("enable"))) {
+					*((unsigned short *)(cv[i].destination)) = 1;
+				} else if (buffer_is_equal_string(ds->value, CONST_STR_LEN("disable"))) {
+					*((unsigned short *)(cv[i].destination)) = 0;
+				} else {
+					log_error_write(srv, __FILE__, __LINE__, "ssbs", "ERROR: unexpected value for key:", cv[i].key, ds->value, "(enable|disable)");
+
+					return -1;
+				}
+			} else {
+				log_error_write(srv, __FILE__, __LINE__, "ssss", "ERROR: unexpected type for key:", cv[i].key, "(string)", "\"(enable|disable)\"");
+
+				return -1;
+			}
+			break;
+		case T_CONFIG_LOCAL:
+		case T_CONFIG_UNSET:
+			break;
+		case T_CONFIG_UNSUPPORTED:
+			log_error_write(srv, __FILE__, __LINE__, "ssss", "ERROR: found unsupported key:", cv[i].key, "-", (char *)(cv[i].destination));
+
+			srv->config_unsupported = 1;
+
+			break;
+		case T_CONFIG_DEPRECATED:
+			log_error_write(srv, __FILE__, __LINE__, "ssss", "ERROR: found deprecated key:", cv[i].key, "-", (char *)(cv[i].destination));
+
+			srv->config_deprecated = 1;
+
+			break;
+		}
+	}
+
+	return 0;
 }
 
-int config_capture(server *srv, int idx) {
-    data_config * const dc = (data_config *)config_reference.data[idx];
-    return (dc->capture_idx)
-      ? dc->capture_idx
-      : (dc->capture_idx = ++srv->config_captures);
+int config_insert_values_global(server *srv, array *ca, const config_values_t cv[], config_scope_type_t scope) {
+	size_t i;
+	data_unset *du;
+
+	for (i = 0; cv[i].key; i++) {
+		data_string *touched;
+
+		if (NULL == (du = array_get_element(ca, cv[i].key))) {
+			/* no found */
+
+			continue;
+		}
+
+		/* touched */
+		touched = data_string_init();
+		
+		buffer_copy_string_len(touched->value, CONST_STR_LEN(""));
+		buffer_copy_buffer(touched->key, du->key);
+
+		array_insert_unique(srv->config_touched, (data_unset *)touched);
+	}
+	
+	return config_insert_values_internal(srv, ca, cv, scope);
 }
 
-int config_feature_bool (const server *srv, const char *feature, int default_value) {
-    return srv->srvconf.feature_flags
-      ? config_plugin_value_tobool(
-          array_get_element_klen(srv->srvconf.feature_flags,
-                                 feature, strlen(feature)), default_value)
-      : default_value;
+static unsigned short sock_addr_get_port(sock_addr *addr) {
+#ifdef HAVE_IPV6
+	return ntohs(addr->plain.sa_family ? addr->ipv6.sin6_port : addr->ipv4.sin_port);
+#else
+	return ntohs(addr->ipv4.sin_port);
+#endif
 }
 
-int32_t config_feature_int (const server *srv, const char *feature, int32_t default_value) {
-    return srv->srvconf.feature_flags
-      ? config_plugin_value_to_int32(
-          array_get_element_klen(srv->srvconf.feature_flags,
-                                 feature, strlen(feature)), default_value)
-      : default_value;
-}
+static cond_result_t config_check_cond_cached(server *srv, connection *con, data_config *dc);
 
-int config_plugin_value_tobool (const data_unset *du, int default_value)
-{
-    if (NULL == du) return default_value;
-    if (du->type == TYPE_STRING) {
-        const buffer *b = &((const data_string *)du)->value;
-        if (buffer_eq_icase_slen(b, CONST_STR_LEN("enable"))
-            || buffer_eq_icase_slen(b, CONST_STR_LEN("enabled"))
-            || buffer_eq_icase_slen(b, CONST_STR_LEN("true"))
-            || buffer_eq_icase_slen(b, CONST_STR_LEN("1")))
-            return 1;
-        else if (buffer_eq_icase_slen(b, CONST_STR_LEN("disable"))
-                 || buffer_eq_icase_slen(b, CONST_STR_LEN("disabled"))
-                 || buffer_eq_icase_slen(b, CONST_STR_LEN("false"))
-                 || buffer_eq_icase_slen(b, CONST_STR_LEN("0")))
-            return 0;
-        else
-            return default_value;
-    }
-    else if (du->type == TYPE_INTEGER)
-        return (0 != ((const data_integer *)du)->value);
-    else
-        return default_value;
-}
+static cond_result_t config_check_cond_nocache(server *srv, connection *con, data_config *dc) {
+	buffer *l;
+	server_socket *srv_sock = con->srv_socket;
 
-int32_t config_plugin_value_to_int32 (const data_unset *du, int32_t default_value)
-{
-    if (NULL == du) return default_value;
-    if (du->type == TYPE_STRING) {
-        const buffer * const b = &((const data_string *)du)->value;
-        char *err;
-        long v = strtol(b->ptr, &err, 10);
-        return (*err=='\0' && err != b->ptr && INT32_MIN <= v && v <= INT32_MAX)
-          ? (int32_t)v
-          : default_value;
-    }
-    else if (du->type == TYPE_INTEGER)
-        return ((const data_integer *)du)->value;
-    else
-        return default_value;
-}
-
-int config_plugin_values_init_block(server * const srv, const array * const ca, const config_plugin_keys_t * const cpk, const char * const mname, config_plugin_value_t *cpv) {
-    /*(cpv must be list with sufficient elements to store all matches + 1)*/
-
-    int rc = 1; /* default is success */
-
-    for (int i = 0; cpk[i].ktype != T_CONFIG_UNSET; ++i) {
-        const data_unset * const du =
-          array_get_element_klen(ca, cpk[i].k, cpk[i].klen);
-        if (NULL == du) continue; /* not found */
-
-        cpv->k_id = i;
-        cpv->vtype = cpk[i].ktype;
-
-        switch (cpk[i].ktype) {
-          case T_CONFIG_ARRAY:
-          case T_CONFIG_ARRAY_KVANY:
-          case T_CONFIG_ARRAY_KVARRAY:
-          case T_CONFIG_ARRAY_KVSTRING:
-          case T_CONFIG_ARRAY_VLIST:
-            if (du->type == TYPE_ARRAY) {
-                cpv->v.a = &((const data_array *)du)->value;
-            }
-            else {
-                log_error(srv->errh, __FILE__, __LINE__,
-                  "%s should have been a list like "
-                  "%s = ( \"...\" )", cpk[i].k, cpk[i].k);
-                rc = 0;
-                continue;
-            }
-            switch (cpk[i].ktype) {
-              case T_CONFIG_ARRAY_KVANY:
-                if (!array_is_kvany(cpv->v.a)) {
-                    log_error(srv->errh, __FILE__, __LINE__,
-                      "%s should have been a list of key => values like "
-                      "%s = ( \"...\" => \"...\", \"...\" => \"...\" )",
-                    cpk[i].k, cpk[i].k);
-                    rc = 0;
-                    continue;
-                }
-                break;
-              case T_CONFIG_ARRAY_KVARRAY:
-                if (!array_is_kvarray(cpv->v.a)) {
-                    log_error(srv->errh, __FILE__, __LINE__,
-                      "%s should have been a list of key => list like "
-                      "%s = ( \"...\" => ( \"...\" => \"...\" ) )",
-                    cpk[i].k, cpk[i].k);
-                    rc = 0;
-                    continue;
-                }
-                break;
-              case T_CONFIG_ARRAY_KVSTRING:
-                if (!array_is_kvstring(cpv->v.a)) {
-                    log_error(srv->errh, __FILE__, __LINE__,
-                      "%s should have been a list of key => string values like "
-                      "%s = ( \"...\" => \"...\", \"...\" => \"...\" )",
-                    cpk[i].k, cpk[i].k);
-                    rc = 0;
-                    continue;
-                }
-                break;
-              case T_CONFIG_ARRAY_VLIST:
-                if (!array_is_vlist(cpv->v.a)) {
-                    log_error(srv->errh, __FILE__, __LINE__,
-                      "%s should have been a list of string values like "
-                      "%s = ( \"...\", \"...\" )",
-                    cpk[i].k, cpk[i].k);
-                    rc = 0;
-                    continue;
-                }
-                break;
-              /*case T_CONFIG_ARRAY:*/
-              default:
-                break;
-            }
-            break;
-          case T_CONFIG_STRING:
-            if (du->type == TYPE_STRING) {
-                cpv->v.b = &((const data_string *)du)->value;
-            }
-            else {
-                log_error(srv->errh, __FILE__, __LINE__,
-                  "%s should have been a string like ... = \"...\"", cpk[i].k);
-                rc = 0;
-                continue;
-            }
-            break;
-          case T_CONFIG_SHORT:
-            switch(du->type) {
-              case TYPE_STRING: {
-                /* If the value came from an environment variable, then it is
-                 * a data_string, although it may contain a number in ASCII
-                 * decimal format.  We try to interpret the string as a decimal
-                 * short before giving up, in order to support setting numeric
-                 * values with environment variables (e.g. port number).
-                 */
-                const char * const v = ((const data_string *)du)->value.ptr;
-                if (v && *v) {
-                    char *e;
-                    long l = strtol(v, &e, 10);
-                    if (e != v && !*e && l >= 0 && l <= 65536) {
-                        if (l == 65536) l = 65535;
-                        cpv->v.shrt = (unsigned short)l;
-                        break;
-                    }
-                }
-                log_error(srv->errh, __FILE__, __LINE__,
-                  "got a string but expected a short integer: %s %s", cpk[i].k, v);
-                rc = 0;
-                continue;
-              }
-              case TYPE_INTEGER:
-                cpv->v.shrt =
-                  (unsigned short)((const data_integer *)du)->value;
-                if (((const data_integer *)du)->value >= 0
-                    && ((const data_integer *)du)->value <= 65536) {
-                    if (((const data_integer *)du)->value == 65536)
-                        cpv->v.shrt = 65535;
-                    break;
-                }
-                __attribute_fallthrough__
-              default:
-                log_error(srv->errh, __FILE__, __LINE__,
-                  "unexpected type for key: %s %d expected a short integer, "
-                  "range 0 ... 65535", cpk[i].k, du->type);
-                rc = 0;
-                continue;
-            }
-            break;
-          case T_CONFIG_INT:
-            switch(du->type) {
-              case TYPE_INTEGER:
-                cpv->v.u = ((const data_integer *)du)->value;
-                break;
-              case TYPE_STRING: {
-                const char * const v = ((const data_string *)du)->value.ptr;
-                if (v && *v) {
-                    char *e;
-                    long l = strtol(v, &e, 10);
-                    if (e != v && !*e && l >= 0) {
-                        cpv->v.u = (unsigned int)l;
-                        break;
-                    }
-                }
-                log_error(srv->errh, __FILE__, __LINE__,
-                  "got a string but expected an integer: %s %s",cpk[i].k,v);
-                rc = 0;
-                continue;
-              }
-              default:
-                log_error(srv->errh, __FILE__, __LINE__,
-                  "unexpected type for key: %s %d expected an integer, "
-                  "range 0 ... 4294967295", cpk[i].k, du->type);
-                rc = 0;
-                continue;
-            }
-            break;
-          case T_CONFIG_BOOL:
-            {
-                int v = config_plugin_value_tobool(du, -1);
-                if (-1 == v) {
-                    log_error(srv->errh, __FILE__, __LINE__,
-                      "ERROR: unexpected type for key: %s (string) "
-                      "\"(enable|disable)\"", cpk[i].k);
-                    rc = 0;
-                    continue;
-                }
-                cpv->v.u = v;
-            }
-            break;
-          case T_CONFIG_LOCAL:
-          case T_CONFIG_UNSET:
-            continue;
-          case T_CONFIG_UNSUPPORTED:
-            log_error(srv->errh, __FILE__, __LINE__,
-              "ERROR: found unsupported key: %s (%s)", cpk[i].k, mname);
-            srv->srvconf.config_unsupported = 1;
-            continue;
-          case T_CONFIG_DEPRECATED:
-            log_error(srv->errh, __FILE__, __LINE__,
-              "ERROR: found deprecated key: %s (%s)", cpk[i].k, mname);
-            srv->srvconf.config_deprecated = 1;
-            continue;
-        }
-
-        ++cpv;
-    }
-
-    cpv->k_id = -1; /* indicate list end */
-
-    return rc;
-}
-
-int config_plugin_values_init(server * const srv, void *p_d, const config_plugin_keys_t * const cpk, const char * const mname) {
-    plugin_data_base * const p = (plugin_data_base *)p_d;
-    array * const touched = srv->srvconf.config_touched;
-    unsigned char matches[4096];   /*directives matches (4k is way too many!)*/
-    unsigned short contexts[4096]; /*conditions matches (4k is way too many!)*/
-    uint32_t n = 0;
-    int rc = 1; /* default is success */
-    force_assert(sizeof(matches) >= srv->config_context->used);
-
-    /* save config reference data for later internal use
-     * (config_plugin_values_init() is called with same srv->config_context) */
-    config_reference.data = (const data_config * const *)srv->config_context->data;
-    config_reference.used = srv->config_context->used;
-
-    /* traverse config contexts twice: once to count, once to store matches */
-
-    for (uint32_t u = 0; u < srv->config_context->used; ++u) {
-        const data_config * const dc =
-          (const data_config *)srv->config_context->data[u];
-        const array * const ca = dc->value;
-
-        matches[n] = 0;
-        for (int i = 0; cpk[i].ktype != T_CONFIG_UNSET; ++i) {
-            const data_unset * const du =
-              array_get_element_klen(ca, cpk[i].k, cpk[i].klen);
-            if (NULL == du) continue; /* not found */
-
-            ++matches[n];
-
-            array_get_buf_ptr(touched, cpk[i].k, cpk[i].klen); /*(empty value)*/
-
-            if (cpk[i].scope == T_CONFIG_SCOPE_CONNECTION || 0 == u) continue;
-
-            if (cpk[i].scope == T_CONFIG_SCOPE_SERVER)
-                /* server scope options should be set only in server scope */
-                log_warn(srv->errh, __FILE__, __LINE__,
-                  "DEPRECATED: do not set server options in conditionals, "
-                  "variable: %s", cpk[i].k);
-            if (cpk[i].scope == T_CONFIG_SCOPE_SOCKET
-                && (dc->comp!=COMP_SERVER_SOCKET || dc->cond!=CONFIG_COND_EQ))
-                /* socket options should be set in socket or global scope */
-                log_warn(srv->errh, __FILE__, __LINE__,
-                  "WARNING: %s must be in global scope or $SERVER[\"socket\"] "
-                  "with '==', or else is ignored", cpk[i].k);
-        }
-        if (matches[n]) contexts[n++] = (unsigned short)u;
-    }
-
-    uint32_t elts = 0;
-    for (uint32_t u = 0; u < n; ++u) elts += matches[u];
-    p->nconfig = n;
-    /*(+1 to include global scope, whether or not any directives exist)*/
-    /*(+n for extra element to end each list)*/
-    p->cvlist = (config_plugin_value_t *)
-      ck_calloc(1+n+n+elts, sizeof(config_plugin_value_t));
-
-    elts = 1+n;
-    /* shift past first element if no directives in global scope */
-    const uint32_t shft = (0 != n && 0 != contexts[0]);
-    if (shft) ++p->nconfig;
-    for (uint32_t u = 0; u < n; ++u) {
-        config_plugin_value_t * const cpv = p->cvlist+shft+u;
-        cpv->k_id = (int)contexts[u];
-        cpv->v.u2[0] = elts;
-        cpv->v.u2[1] = matches[u];
-        elts += matches[u]+1;     /* +1 to end list with cpv->k_id = -1 */
-    }
-
-    for (uint32_t u = 0; u < n; ++u) {
-        const array *ca =
-          ((data_config const *)srv->config_context->data[contexts[u]])->value;
-        config_plugin_value_t *cpv = p->cvlist + p->cvlist[shft+u].v.u2[0];
-        if (!config_plugin_values_init_block(srv, ca, cpk, mname, cpv))
-            rc = 0;
-    }
-
-    return rc;
-}
-
-__attribute_cold__
-__attribute_noinline__
-static void config_cond_result_trace(request_st * const r, const data_config * const dc, const int cached) {
-    cond_cache_t * const cache = &r->cond_cache[dc->context_ndx];
-    const char *msg;
-    switch (cache->result) {
-      case COND_RESULT_UNSET: msg = "unset"; break;
-      case COND_RESULT_SKIP:  msg = "skipped"; break;
-      case COND_RESULT_FALSE: msg = "false"; break;
-      case COND_RESULT_TRUE:  msg = "true"; break;
-      default:                msg = "invalid cond_result_t"; break;
-    }
-    log_debug(r->conf.errh, __FILE__, __LINE__, "%d (%s) result: %s (cond: %s)",
-              dc->context_ndx, &"uncached"[cached ? 2 : 0], msg, dc->key.ptr);
-}
-
-static cond_result_t config_check_cond_nocache(request_st *r, const data_config *dc, int debug_cond, cond_cache_t *cache);
-
-static cond_result_t config_check_cond_nocache_calc(request_st * const r, const data_config * const dc, const int debug_cond, cond_cache_t * const cache) {
-    cache->result = config_check_cond_nocache(r, dc, debug_cond, cache);
-    if (debug_cond) config_cond_result_trace(r, dc, 0);
-    return cache->result;
-}
-
-static cond_result_t config_check_cond_cached(request_st * const r, const data_config * const dc, const int debug_cond) {
-    cond_cache_t * const cache = &r->cond_cache[dc->context_ndx];
-    if (COND_RESULT_UNSET != cache->result) {
-        if (debug_cond) config_cond_result_trace(r, dc, 1);
-        return cache->result;
-    }
-    return config_check_cond_nocache_calc(r, dc, debug_cond, cache);
-}
-
-static int config_pcre_match(request_st *r, const data_config *dc, const buffer *b);
-
-static cond_result_t config_check_cond_nocache_eval(request_st * const r, const data_config * const dc, const int debug_cond, cond_cache_t * const cache);
-
-static cond_result_t config_check_cond_nocache(request_st * const r, const data_config * const dc, const int debug_cond, cond_cache_t * const cache) {
 	/* check parent first */
 	if (dc->parent && dc->parent->context_ndx) {
 		/**
@@ -425,233 +237,338 @@ static cond_result_t config_check_cond_nocache(request_st * const r, const data_
 		 *
 		 * if the parent is not decided yet or false, we can't be true either 
 		 */
-		if (debug_cond) {
-			log_debug(r->conf.errh, __FILE__, __LINE__, "go parent %s", dc->parent->key.ptr);
+		if (con->conf.log_condition_handling) {
+			log_error_write(srv, __FILE__, __LINE__,  "sb", "go parent", dc->parent->key);
 		}
 
-		switch (config_check_cond_cached(r, dc->parent, debug_cond)) {
-		case COND_RESULT_UNSET:
-			/* decide later */
-			return COND_RESULT_UNSET;
-		case COND_RESULT_SKIP:
+		switch (config_check_cond_cached(srv, con, dc->parent)) {
 		case COND_RESULT_FALSE:
-			/* failed precondition */
-			return COND_RESULT_SKIP;
-		case COND_RESULT_TRUE:
-			/* proceed */
+			return COND_RESULT_FALSE;
+		case COND_RESULT_UNSET:
+			return COND_RESULT_UNSET;
+		default:
 			break;
 		}
 	}
 
 	if (dc->prev) {
 		/**
-		 * a else branch; can only be executed if the previous branch
-		 * was evaluated as "false" (not unset/skipped/true)
+		 * a else branch
+		 *
+		 * we can only be executed, if all of our previous brothers 
+		 * are false
 		 */
-		if (debug_cond) {
-			log_debug(r->conf.errh, __FILE__, __LINE__, "go prev %s", dc->prev->key.ptr);
+		if (con->conf.log_condition_handling) {
+			log_error_write(srv, __FILE__, __LINE__,  "sb", "go prev", dc->prev->key);
 		}
 
 		/* make sure prev is checked first */
-		switch (config_check_cond_cached(r, dc->prev, debug_cond)) {
-		case COND_RESULT_UNSET:
-			/* decide later */
-			return COND_RESULT_UNSET;
-		case COND_RESULT_SKIP:
-		case COND_RESULT_TRUE:
-			/* failed precondition */
-			return COND_RESULT_SKIP;
+		config_check_cond_cached(srv, con, dc->prev);
+
+		/* one of prev set me to FALSE */
+		switch (con->cond_cache[dc->context_ndx].result) {
 		case COND_RESULT_FALSE:
-			/* proceed */
+			return con->cond_cache[dc->context_ndx].result;
+		default:
 			break;
 		}
 	}
 
-	if (!(r->conditional_is_valid & (1 << dc->comp))) {
-		if (debug_cond) {
-			log_debug(r->conf.errh, __FILE__, __LINE__,
-			  "%d %s not available yet", dc->comp, dc->key.ptr);
+	if (!con->conditional_is_valid[dc->comp]) {
+		if (con->conf.log_condition_handling) {
+			log_error_write(srv, __FILE__, __LINE__,  "dss", 
+				dc->comp,
+				dc->key->ptr,
+				con->conditional_is_valid[dc->comp] ? "yeah" : "nej");
 		}
 
 		return COND_RESULT_UNSET;
 	}
 
-	/* if we had a real result before and weren't cleared just return it */
-	switch (cache->local_result) {
-	case COND_RESULT_TRUE:
-	case COND_RESULT_FALSE:
-		return cache->local_result;
-	default:
-		break;
-	}
-
-	if (CONFIG_COND_ELSE == dc->cond)
-		return (cache->local_result = COND_RESULT_TRUE);
-		/* remember result of local condition for a partial reset */
-
-	return config_check_cond_nocache_eval(r, dc, debug_cond, cache);
-}
-
-static cond_result_t config_check_cond_nocache_eval(request_st * const r, const data_config * const dc, const int debug_cond, cond_cache_t * const cache) {
 	/* pass the rules */
 
-	static const struct const_char_buffer {
-	  const char *ptr;
-	  uint32_t used;
-	  uint32_t size;
-	} empty_string = { "", 1, 0 };
-
-	const buffer *l;
 	switch (dc->comp) {
-	case COMP_HTTP_HOST:
-		l = &r->uri.authority;
+	case COMP_HTTP_HOST: {
+		char *ck_colon = NULL, *val_colon = NULL;
+
+		if (!buffer_string_is_empty(con->uri.authority)) {
+
+			/*
+			 * append server-port to the HTTP_POST if necessary
+			 */
+
+			l = con->uri.authority;
+
+			switch(dc->cond) {
+			case CONFIG_COND_NE:
+			case CONFIG_COND_EQ:
+				ck_colon = strchr(dc->string->ptr, ':');
+				val_colon = strchr(l->ptr, ':');
+
+				if (NULL != ck_colon && NULL == val_colon) {
+					/* condition "host:port" but client send "host" */
+					buffer_copy_buffer(srv->cond_check_buf, l);
+					buffer_append_string_len(srv->cond_check_buf, CONST_STR_LEN(":"));
+					buffer_append_int(srv->cond_check_buf, sock_addr_get_port(&(srv_sock->addr)));
+					l = srv->cond_check_buf;
+				} else if (NULL != val_colon && NULL == ck_colon) {
+					/* condition "host" but client send "host:port" */
+					buffer_copy_string_len(srv->cond_check_buf, l->ptr, val_colon - l->ptr);
+					l = srv->cond_check_buf;
+				}
+				break;
+			default:
+				break;
+			}
+#if defined USE_OPENSSL && ! defined OPENSSL_NO_TLSEXT
+		} else if (!buffer_string_is_empty(con->tlsext_server_name)) {
+			l = con->tlsext_server_name;
+#endif
+		} else {
+			l = srv->empty_string;
+		}
 		break;
-	case COMP_HTTP_REMOTE_IP:
-		l = r->dst_addr_buf;
+	}
+	case COMP_HTTP_REMOTE_IP: {
+		char *nm_slash;
+		/* handle remoteip limitations
+		 *
+		 * "10.0.0.1" is provided for all comparisions
+		 *
+		 * only for == and != we support
+		 *
+		 * "10.0.0.1/24"
+		 */
+
+		if ((dc->cond == CONFIG_COND_EQ ||
+		     dc->cond == CONFIG_COND_NE) &&
+		    (con->dst_addr.plain.sa_family == AF_INET) &&
+		    (NULL != (nm_slash = strchr(dc->string->ptr, '/')))) {
+			int nm_bits;
+			long nm;
+			char *err;
+			struct in_addr val_inp;
+
+			if (*(nm_slash+1) == '\0') {
+				log_error_write(srv, __FILE__, __LINE__, "sb", "ERROR: no number after / ", dc->string);
+
+				return COND_RESULT_FALSE;
+			}
+
+			nm_bits = strtol(nm_slash + 1, &err, 10);
+
+			if (*err) {
+				log_error_write(srv, __FILE__, __LINE__, "sbs", "ERROR: non-digit found in netmask:", dc->string, err);
+
+				return COND_RESULT_FALSE;
+			}
+
+			if (nm_bits > 32 || nm_bits < 0) {
+				log_error_write(srv, __FILE__, __LINE__, "sbs", "ERROR: invalid netmask:", dc->string, err);
+
+				return COND_RESULT_FALSE;
+			}
+
+			/* take IP convert to the native */
+			buffer_copy_string_len(srv->cond_check_buf, dc->string->ptr, nm_slash - dc->string->ptr);
+#ifdef __WIN32
+			if (INADDR_NONE == (val_inp.s_addr = inet_addr(srv->cond_check_buf->ptr))) {
+				log_error_write(srv, __FILE__, __LINE__, "sb", "ERROR: ip addr is invalid:", srv->cond_check_buf);
+
+				return COND_RESULT_FALSE;
+			}
+
+#else
+			if (0 == inet_aton(srv->cond_check_buf->ptr, &val_inp)) {
+				log_error_write(srv, __FILE__, __LINE__, "sb", "ERROR: ip addr is invalid:", srv->cond_check_buf);
+
+				return COND_RESULT_FALSE;
+			}
+#endif
+
+			/* build netmask */
+			nm = nm_bits ? htonl(~((1 << (32 - nm_bits)) - 1)) : 0;
+
+			if ((val_inp.s_addr & nm) == (con->dst_addr.ipv4.sin_addr.s_addr & nm)) {
+				return (dc->cond == CONFIG_COND_EQ) ? COND_RESULT_TRUE : COND_RESULT_FALSE;
+			} else {
+				return (dc->cond == CONFIG_COND_EQ) ? COND_RESULT_FALSE : COND_RESULT_TRUE;
+			}
+		} else {
+			l = con->dst_addr_buf;
+		}
 		break;
+	}
 	case COMP_HTTP_SCHEME:
-		l = &r->uri.scheme;
+		l = con->uri.scheme;
 		break;
+
 	case COMP_HTTP_URL:
-		l = &r->uri.path;
+		l = con->uri.path;
 		break;
+
 	case COMP_HTTP_QUERY_STRING:
-		l = &r->uri.query;
+		l = con->uri.query;
 		break;
+
 	case COMP_SERVER_SOCKET:
-		l = r->con->srv_socket->srv_token;
+		l = srv_sock->srv_token;
 		break;
-	case COMP_HTTP_REQUEST_HEADER:
-		l = http_header_request_get(r, dc->ext, BUF_PTR_LEN(&dc->comp_tag));
+
+	case COMP_HTTP_REFERER: {
+		data_string *ds;
+
+		if (NULL != (ds = (data_string *)array_get_element(con->request.headers, "Referer"))) {
+			l = ds->value;
+		} else {
+			l = srv->empty_string;
+		}
 		break;
-	case COMP_HTTP_REQUEST_METHOD:
-		l = http_method_buf(r->http_method);
+	}
+	case COMP_HTTP_COOKIE: {
+		data_string *ds;
+		if (NULL != (ds = (data_string *)array_get_element(con->request.headers, "Cookie"))) {
+			l = ds->value;
+		} else {
+			l = srv->empty_string;
+		}
 		break;
+	}
+	case COMP_HTTP_USER_AGENT: {
+		data_string *ds;
+		if (NULL != (ds = (data_string *)array_get_element(con->request.headers, "User-Agent"))) {
+			l = ds->value;
+		} else {
+			l = srv->empty_string;
+		}
+		break;
+	}
+	case COMP_HTTP_REQUEST_METHOD: {
+		const char *method = get_http_method_name(con->request.http_method);
+
+		/* we only have the request method as const char but we need a buffer for comparing */
+
+		buffer_copy_string(srv->tmp_buf, method);
+
+		l = srv->tmp_buf;
+
+		break;
+	}
+	case COMP_HTTP_LANGUAGE: {
+		data_string *ds;
+		if (NULL != (ds = (data_string *)array_get_element(con->request.headers, "Accept-Language"))) {
+			l = ds->value;
+		} else {
+			l = srv->empty_string;
+		}
+		break;
+	}
 	default:
-		return (cache->local_result = COND_RESULT_FALSE);
+		return COND_RESULT_FALSE;
 	}
 
-	if (__builtin_expect( (buffer_is_empty(l)), 0))
-		l = (buffer *)&empty_string;
+	if (NULL == l) {
+		if (con->conf.log_condition_handling) {
+			log_error_write(srv, __FILE__, __LINE__,  "bsbs", dc->comp_key,
+					"(", l, ") compare to NULL");
+		}
+		return COND_RESULT_FALSE;
+	}
 
-	if (debug_cond)
-		log_debug(r->conf.errh, __FILE__, __LINE__,
-			"%s compare to %s", dc->comp_key, l->ptr);
-
-	int match;
+	if (con->conf.log_condition_handling) {
+		log_error_write(srv, __FILE__, __LINE__,  "bsbsb", dc->comp_key,
+				"(", l, ") compare to ", dc->string);
+	}
 	switch(dc->cond) {
 	case CONFIG_COND_NE:
 	case CONFIG_COND_EQ:
-		match = (dc->cond == CONFIG_COND_EQ);
-		if (dc->comp == COMP_HTTP_HOST && dc->string.ptr[0] != '/') {
-			uint_fast32_t llen = buffer_clen(l);
-			uint_fast32_t dlen = buffer_clen(&dc->string);
-			/* check names match, whether or not :port suffix present */
-			/*(not strictly checking for port match for alt-svc flexibility,
-			 * though if strings are same length, port is checked for match)*/
-			/*(r->uri.authority not strictly checked here for excess ':')*/
-			/*(r->uri.authority lowercased during request parsing)*/
-			if (llen && llen != dlen) {
-				match ^= ((llen > dlen)
-				             ? l->ptr[dlen] == ':' && llen - dlen <= 6
-				             : dc->string.ptr[(dlen = llen)] == ':')
-				         && 0 == memcmp(l->ptr, dc->string.ptr, dlen);
-				break;
-			}
+		if (buffer_is_equal(l, dc->string)) {
+			return (dc->cond == CONFIG_COND_EQ) ? COND_RESULT_TRUE : COND_RESULT_FALSE;
+		} else {
+			return (dc->cond == CONFIG_COND_EQ) ? COND_RESULT_FALSE : COND_RESULT_TRUE;
 		}
-		else if (dc->comp == COMP_HTTP_REMOTE_IP && dc->string.ptr[0] != '/') {
-			/* CIDR mask comparisons only supported for COND_EQ, COND_NE */
-			/* compare using structure data after end of string
-			 * (generated at startup when parsing config) */
-			const sock_addr * const addr = (sock_addr *)
-			  (((uintptr_t)dc->string.ptr + dc->string.used + 1 + 7) & ~7);
-			int bits = ((unsigned char *)dc->string.ptr)[dc->string.used];
-			match ^= (bits)
-			  ? sock_addr_is_addr_eq_bits(addr, r->dst_addr, bits)
-			  : sock_addr_is_addr_eq(addr, r->dst_addr);
-			break;
-		}
-		match ^= (buffer_is_equal(l, &dc->string));
 		break;
+#ifdef HAVE_PCRE_H
 	case CONFIG_COND_NOMATCH:
-	case CONFIG_COND_MATCH:
-		match = (dc->cond == CONFIG_COND_MATCH);
-		match ^= (config_pcre_match(r, dc, l) > 0);
-		break;
-	case CONFIG_COND_PREFIX:
-	case CONFIG_COND_SUFFIX:
-		{
-			uint_fast32_t llen = buffer_clen(l);
-			uint_fast32_t dlen = buffer_clen(&dc->string);
-			uint_fast32_t off  = (dc->cond == CONFIG_COND_PREFIX)
-			                   ? 0
-			                   : llen - dlen; /*(underflow caught below)*/
-			match = !(dlen <= llen
-			          && 0 == memcmp(l->ptr+off, dc->string.ptr, dlen));
+	case CONFIG_COND_MATCH: {
+		cond_cache_t *cache = &con->cond_cache[dc->context_ndx];
+		int n;
+
+#ifndef elementsof
+#define elementsof(x) (sizeof(x) / sizeof(x[0]))
+#endif
+		n = pcre_exec(dc->regex, dc->regex_study, CONST_BUF_LEN(l), 0, 0,
+				cache->matches, elementsof(cache->matches));
+
+		cache->patterncount = n;
+		if (n > 0) {
+			cache->comp_value = l;
+			cache->comp_type  = dc->comp;
+			return (dc->cond == CONFIG_COND_MATCH) ? COND_RESULT_TRUE : COND_RESULT_FALSE;
+		} else {
+			/* cache is already cleared */
+			return (dc->cond == CONFIG_COND_MATCH) ? COND_RESULT_FALSE : COND_RESULT_TRUE;
 		}
 		break;
+	}
+#endif
 	default:
-		match = 1; /* return (cache->local_result = COND_RESULT_FALSE); below */
+		/* no way */
 		break;
 	}
-	/* remember result of local condition for a partial reset */
-	cache->local_result = match ? COND_RESULT_FALSE : COND_RESULT_TRUE;
-	return cache->local_result;
+
+	return COND_RESULT_FALSE;
 }
 
-__attribute_noinline__
-static cond_result_t config_check_cond_calc(request_st * const r, const int context_ndx, cond_cache_t * const cache) {
-    const data_config * const dc = config_reference.data[context_ndx];
-    const int debug_cond = r->conf.log_condition_handling;
-    if (debug_cond) {
-        log_debug(r->conf.errh, __FILE__, __LINE__,
-                  "=== start of condition block ===");
-    }
-    return config_check_cond_nocache_calc(r, dc, debug_cond, cache);
-}
+static cond_result_t config_check_cond_cached(server *srv, connection *con, data_config *dc) {
+	cond_cache_t *caches = con->cond_cache;
 
-/* future: might make static inline in header for plugins */
-int config_check_cond(request_st * const r, const int context_ndx) {
-    cond_cache_t * const cache = &r->cond_cache[context_ndx];
-    return COND_RESULT_TRUE
-        == (COND_RESULT_UNSET != cache->result
-              ? (cond_result_t)cache->result
-              : config_check_cond_calc(r, context_ndx, cache));
-}
-
-/* if we reset the cache result for a node, we also need to clear all
- * child nodes and else-branches*/
-static void config_cond_clear_node(cond_cache_t * const cond_cache, const data_config * const dc) {
-	/* if a node is "unset" all children are unset too */
-	if (cond_cache[dc->context_ndx].result != COND_RESULT_UNSET) {
-		cond_cache[dc->context_ndx].result = COND_RESULT_UNSET;
-
-		for (uint32_t i = 0; i < dc->children.used; ++i) {
-			const data_config *dc_child = dc->children.data[i];
-			if (NULL == dc_child->prev) {
-				/* only call for first node in if-else chain */
-				config_cond_clear_node(cond_cache, dc_child);
+	if (COND_RESULT_UNSET == caches[dc->context_ndx].result) {
+		if (COND_RESULT_TRUE == (caches[dc->context_ndx].result = config_check_cond_nocache(srv, con, dc))) {
+			if (dc->next) {
+				data_config *c;
+				if (con->conf.log_condition_handling) {
+					log_error_write(srv, __FILE__, __LINE__, "s",
+							"setting remains of chaining to false");
+				}
+				for (c = dc->next; c; c = c->next) {
+					caches[c->context_ndx].result = COND_RESULT_FALSE;
+				}
 			}
 		}
-		if (NULL != dc->next) config_cond_clear_node(cond_cache, dc->next);
+		caches[dc->context_ndx].comp_type = dc->comp;
+
+		if (con->conf.log_condition_handling) {
+			log_error_write(srv, __FILE__, __LINE__, "dss", dc->context_ndx,
+					"(uncached) result:",
+					caches[dc->context_ndx].result == COND_RESULT_UNSET ? "unknown" :
+						(caches[dc->context_ndx].result == COND_RESULT_TRUE ? "true" : "false"));
+		}
+	} else {
+		if (con->conf.log_condition_handling) {
+			log_error_write(srv, __FILE__, __LINE__, "dss", dc->context_ndx,
+					"(cached) result:",
+					caches[dc->context_ndx].result == COND_RESULT_UNSET ? "unknown" : 
+						(caches[dc->context_ndx].result == COND_RESULT_TRUE ? "true" : "false"));
+		}
 	}
+	return caches[dc->context_ndx].result;
 }
 
 /**
  * reset the config-cache for a named item
+ *
+ * if the item is COND_LAST_ELEMENT we reset all items
  */
-void config_cond_cache_reset_item(request_st * const r, comp_key_t item) {
-	cond_cache_t * const cond_cache = r->cond_cache;
-	const data_config * const * const data = config_reference.data;
-	const uint32_t used = config_reference.used;
-	for (uint32_t i = 0; i < used; ++i) {
-		const data_config * const dc = data[i];
+void config_cond_cache_reset_item(server *srv, connection *con, comp_key_t item) {
+	size_t i;
 
-		if (item == dc->comp) {
-			/* clear local_result */
-			cond_cache[i].local_result = COND_RESULT_UNSET;
-			/* clear result in subtree (including the node itself) */
-			config_cond_clear_node(cond_cache, dc);
+	for (i = 0; i < srv->config_context->used; i++) {
+		if (item == COMP_LAST_ELEMENT || 
+		    con->cond_cache[i].comp_type == item) {
+			con->cond_cache[i].result = COND_RESULT_UNSET;
+			con->cond_cache[i].patterncount = 0;
+			con->cond_cache[i].comp_value = NULL;
 		}
 	}
 }
@@ -659,84 +576,34 @@ void config_cond_cache_reset_item(request_st * const r, comp_key_t item) {
 /**
  * reset the config cache to its initial state at connection start
  */
-void config_cond_cache_reset(request_st * const r) {
-	/* resetting all entries; no need to follow children as in config_cond_cache_reset_item */
-	/* static_assert(0 == COND_RESULT_UNSET); */
-	const uint32_t used = config_reference.used;
-	if (used > 1)
-		memset(r->cond_cache, 0, used*sizeof(cond_cache_t));
+void config_cond_cache_reset(server *srv, connection *con) {
+	size_t i;
+
+	config_cond_cache_reset_all_items(srv, con);
+
+	for (i = 0; i < COMP_LAST_ELEMENT; i++) {
+		con->conditional_is_valid[i] = 0;
+	}
 }
 
-#ifdef HAVE_PCRE2_H
-#define PCRE2_CODE_UNIT_WIDTH 8
-#include <pcre2.h>
-#elif defined(HAVE_PCRE_H)
-#include <pcre.h>
-#endif
-
-static int config_pcre_match(request_st * const r, const data_config * const dc, const buffer * const b) {
-
-  #ifdef HAVE_PCRE2_H
-
-    if (__builtin_expect( (0 == dc->capture_idx), 1))
-        return pcre2_match(dc->code, (PCRE2_SPTR)BUF_PTR_LEN(b),
-                           0, 0, dc->match_data, NULL);
-
-    const int capture_offset = dc->capture_idx - 1;
-    cond_match_t * const cond_match =
-      r->cond_match[capture_offset] = r->cond_match_data + capture_offset;
-    pcre2_match_data *match_data = cond_match->match_data;
-    if (__builtin_expect( (NULL == match_data), 0)) {
-        /*(allocate on demand)*/
-      #if 0 /*(if we did not want to share dc->match_data across requests)*/
-        /* index 0 is reused for all matches for which captures not used by
-         * other directives within the condition, so allocate for up to 9
-         * captures, plus 1 for %0 for full match.  Number of captures is
-         * checked at startup to be <= 9 in data_config_pcre_compile()
-         * (future: could save a few bytes if max captures were calculated
-         *  at startup in config_finalize()) */
-        match_data = cond_match->match_data = (0 == dc->capture_idx)
-          ? pcre2_match_data_create(10, NULL)
-          : pcre2_match_data_create_from_pattern(dc->code, NULL);
-      #else
-        match_data = cond_match->match_data =
-          pcre2_match_data_create_from_pattern(dc->code, NULL);
-      #endif
-        force_assert(match_data);
-        cond_match->matches = pcre2_get_ovector_pointer(match_data);
-    }
-    cond_match->comp_value = b; /*holds pointer to b (!) for pattern subst*/
-    cond_match->captures =
-      pcre2_match(dc->code, (PCRE2_SPTR)BUF_PTR_LEN(b), 0, 0, match_data, NULL);
-    return cond_match->captures;
-
-  #elif defined(HAVE_PCRE_H)
-
-    if (__builtin_expect( (0 == dc->capture_idx), 1)) {
-        int matches[3 * 10];
-        return pcre_exec(dc->regex, dc->regex_study, BUF_PTR_LEN(b), 0, 0,
-                         matches, sizeof(matches)/sizeof(*matches));
-    }
-
-    const int capture_offset = dc->capture_idx - 1;
-    cond_match_t * const cond_match =
-      r->cond_match[capture_offset] = r->cond_match_data + capture_offset;
-    if (__builtin_expect( (NULL == cond_match->matches), 0)) {
-        /*(allocate on demand)*/
-        cond_match->matches = ck_malloc(dc->ovec_nelts * sizeof(int));
-    }
-    cond_match->comp_value = b; /*holds pointer to b (!) for pattern subst*/
-    cond_match->captures =
-      pcre_exec(dc->regex, dc->regex_study, BUF_PTR_LEN(b), 0, 0,
-                cond_match->matches, dc->ovec_nelts);
-    return cond_match->captures;
-
-  #else
-
-    UNUSED(r);
-    UNUSED(dc);
-    UNUSED(b);
-    return 0;
-
-  #endif
+int config_check_cond(server *srv, connection *con, data_config *dc) {
+	if (con->conf.log_condition_handling) {
+		log_error_write(srv, __FILE__, __LINE__,  "s",  "=== start of condition block ===");
+	}
+	return (config_check_cond_cached(srv, con, dc) == COND_RESULT_TRUE);
 }
+
+int config_append_cond_match_buffer(connection *con, data_config *dc, buffer *buf, int n)
+{
+	cond_cache_t *cache = &con->cond_cache[dc->context_ndx];
+	if (n >= cache->patterncount) {
+		return 0;
+	}
+
+	n <<= 1; /* n *= 2 */
+	buffer_append_string_len(buf,
+			cache->comp_value->ptr + cache->matches[n],
+			cache->matches[n + 1] - cache->matches[n]);
+	return 1;
+}
+

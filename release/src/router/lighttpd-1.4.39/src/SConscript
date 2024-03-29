@@ -1,14 +1,8 @@
-import itertools
 import os
 import re
+import types
+import itertools
 from collections import OrderedDict
-from copy import copy
-
-try:
-	string_types = basestring
-except NameError:
-	string_types = str
-
 
 # search any file, not just executables
 def WhereIsFile(file, paths):
@@ -27,7 +21,7 @@ def WhereIsFile(file, paths):
 	return None
 
 def FlattenLibs(libs):
-	if isinstance(libs, string_types):
+	if isinstance(libs, basestring):
 		return [libs]
 	else:
 		return [item for sublibs in libs for item in FlattenLibs(sublibs)]
@@ -41,155 +35,101 @@ def RemoveDuplicateLibs(libs):
 
 Import('env')
 
-def WorkaroundFreeBSDLibOrder(libs):
-	# lib(re)ssl includes (weak) arc4random functions
-	# which "on purpose" might conflict with those in libc
-	# => link libc first solves this
-	# (required for FreeBSD11 fullstatic build)
-	import platform
-	if ('c' in libs) and (platform.system() == 'FreeBSD'):
-		return ['c'] + libs
-	return libs
-
 def GatherLibs(env, *libs):
-	libs = RemoveDuplicateLibs(env['LIBS'] + list(libs) + [env['APPEND_LIBS']])
-	return WorkaroundFreeBSDLibOrder(libs)
+	return RemoveDuplicateLibs(env['LIBS'] + list(libs) + [env['APPEND_LIBS']])
 
-common_src = Split("base64.c buffer.c burl.c log.c \
-	http_header.c http_kv.c keyvalue.c chunk.c  \
-	http_chunk.c fdevent.c fdevent_fdnode.c gw_backend.c \
-	stat_cache.c http_etag.c array.c \
-	algo_md5.c algo_sha1.c algo_splaytree.c \
+common_src = Split("base64.c buffer.c log.c \
+	keyvalue.c chunk.c  \
+	http_chunk.c stream.c fdevent.c \
+	stat_cache.c plugin.c joblist.c etag.c array.c \
+	data_string.c data_count.c data_array.c \
+	data_integer.c md5.c data_fastcgi.c \
+	fdevent_select.c fdevent_libev.c \
+	fdevent_poll.c fdevent_linux_sysepoll.c \
+	fdevent_solaris_devpoll.c fdevent_solaris_port.c \
+	fdevent_freebsd_kqueue.c \
+	data_config.c \
+	inet_ntop_cache.c crc32.c \
+	connections-glue.c \
 	configfile-glue.c \
 	http-header-glue.c \
-	http_cgi.c \
-	http_date.c \
-	plugin.c \
-	reqpool.c \
-	request.c \
-	sock_addr.c \
-	rand.c \
-	fdlog_maint.c \
-	fdlog.c \
-	sys-setjmp.c \
-	ck.c \
+	splaytree.c network_writev.c \
+	network_write_mmap.c network_write_no_mmap.c \
+	network_write.c network_linux_sendfile.c \
+	network_freebsd_sendfile.c  \
+	network_solaris_sendfilev.c network_openssl.c \
+	status_counter.c safe_memclear.c network_darwin_sendfile.c \
 ")
 
-src = Split("server.c response.c connections.c h1.c \
-	sock_addr_cache.c \
-	fdevent_impl.c \
-	http_range.c \
-	network.c \
-	network_write.c \
-	data_config.c \
-	configfile.c configparser.c")
-
-builtin_mods = Split(" \
-  mod_rewrite.c \
-  mod_redirect.c \
-  mod_access.c \
-  mod_alias.c \
-  mod_indexfile.c \
-  mod_staticfile.c \
-  mod_setenv.c \
-  mod_expire.c \
-  mod_simple_vhost.c \
-  mod_evhost.c \
-  mod_fastcgi.c \
-  mod_scgi.c \
-  ")
+src = Split("server.c response.c connections.c network.c \
+	configfile.c configparser.c request.c proc_open.c")
 
 lemon = env.Program('lemon', 'lemon.c', LIBS = GatherLibs(env))
 
 def Lemon(env, input):
-	parser = env.Command([input.replace('.y', '.c'),input.replace('.y', '.h')], input, lemon[0].path + ' -q -dsconsbuild/build -Tsrc/lempar.c $SOURCE')
+	parser = env.Command([input.replace('.y', '.c'),input.replace('.y', '.h')], input, '(cd sconsbuild/build; ../../' + lemon[0].path + ' -q ../../$SOURCE ../../src/lempar.c)')
 	env.Depends(parser, lemon)
 
 configparser = Lemon(env, 'configparser.y')
+mod_ssi_exprparser = Lemon(env, 'mod_ssi_exprparser.y')
 
 ## the modules and how they are built
 modules = {
-	'mod_accesslog' : { 'src' : [ 'mod_accesslog.c' ] },
-	'mod_ajp13' : { 'src' : [ 'mod_ajp13.c' ] },
-	'mod_auth' : { 'src' : [ 'mod_auth.c', 'mod_auth_api.c' ], 'lib' : [ env['LIBCRYPTO'] ] },
-	'mod_authn_file' : { 'src' : [ 'mod_authn_file.c' ], 'lib' : [ env['LIBCRYPT'], env['LIBCRYPTO'] ] },
+	'mod_access' : { 'src' : [ 'mod_access.c' ] },
+	'mod_alias' : { 'src' : [ 'mod_alias.c' ] },
 	'mod_cgi' : { 'src' : [ 'mod_cgi.c' ] },
-	'mod_deflate' : { 'src' : [ 'mod_deflate.c' ], 'lib' : [ env['LIBZ'], env['LIBZSTD'], env['LIBBZ2'], env['LIBBROTLI'], env['LIBDEFLATE'], 'm' ] },
-	'mod_dirlisting' : { 'src' : [ 'mod_dirlisting.c' ] },
+	'mod_fastcgi' : { 'src' : [ 'mod_fastcgi.c' ] },
+	'mod_scgi' : { 'src' : [ 'mod_scgi.c' ] },
 	'mod_extforward' : { 'src' : [ 'mod_extforward.c' ] },
-	'mod_h2' : { 'src' : [ 'h2.c', 'ls-hpack/lshpack.c', 'algo_xxhash.c' ], 'lib' : [ env['LIBXXHASH'] ] },
-	'mod_proxy' : { 'src' : [ 'mod_proxy.c' ] },
+	'mod_staticfile' : { 'src' : [ 'mod_staticfile.c' ] },
+	'mod_dirlisting' : { 'src' : [ 'mod_dirlisting.c' ], 'lib' : [ env['LIBPCRE'] ] },
+	'mod_indexfile' : { 'src' : [ 'mod_indexfile.c' ] },
+	'mod_setenv' : { 'src' : [ 'mod_setenv.c' ] },
 	'mod_rrdtool' : { 'src' : [ 'mod_rrdtool.c' ] },
-	'mod_sockproxy' : { 'src' : [ 'mod_sockproxy.c' ] },
-	'mod_ssi' : { 'src' : [ 'mod_ssi.c' ] },
-	'mod_status' : { 'src' : [ 'mod_status.c' ] },
+	'mod_usertrack' : { 'src' : [ 'mod_usertrack.c' ] },
+	'mod_proxy' : { 'src' : [ 'mod_proxy.c' ] },
 	'mod_userdir' : { 'src' : [ 'mod_userdir.c' ] },
-	'mod_vhostdb' : { 'src' : [ 'mod_vhostdb.c', 'mod_vhostdb_api.c' ] },
-	'mod_webdav' : { 'src' : [ 'mod_webdav.c' ], 'lib' : [ env['LIBXML2'], env['LIBSQLITE3'] ] },
-	'mod_wstunnel' : { 'src' : [ 'mod_wstunnel.c' ], 'lib' : [ env['LIBCRYPTO'] ] },
+	'mod_secdownload' : { 'src' : [ 'mod_secdownload.c' ] },
+	'mod_accesslog' : { 'src' : [ 'mod_accesslog.c' ] },
+	'mod_simple_vhost' : { 'src' : [ 'mod_simple_vhost.c' ] },
+	'mod_evhost' : { 'src' : [ 'mod_evhost.c' ] },
+	'mod_expire' : { 'src' : [ 'mod_expire.c' ] },
+	'mod_status' : { 'src' : [ 'mod_status.c' ] },
+	'mod_compress' : { 'src' : [ 'mod_compress.c' ], 'lib' : [ env['LIBZ'], env['LIBBZ2'] ] },
+	'mod_redirect' : { 'src' : [ 'mod_redirect.c' ], 'lib' : [ env['LIBPCRE'] ] },
+	'mod_rewrite' : { 'src' : [ 'mod_rewrite.c' ], 'lib' : [ env['LIBPCRE'] ] },
+	'mod_auth' : {
+		'src' : [ 'mod_auth.c', 'http_auth.c' ],
+		'lib' : [ env['LIBCRYPT'], env['LIBLDAP'], env['LIBLBER'] ] },
+	'mod_webdav' : { 'src' : [ 'mod_webdav.c' ], 'lib' : [ env['LIBXML2'], env['LIBSQLITE3'], env['LIBUUID'] ] },
+	'mod_mysql_vhost' : { 'src' : [ 'mod_mysql_vhost.c' ], 'lib' : [ env['LIBMYSQL'] ] },
+#	'mod_uploadprogress' : { 'src' : [ 'mod_uploadprogress.c' ] },
+	'mod_evasive' : { 'src' : [ 'mod_evasive.c' ] },
+	'mod_ssi' : { 'src' : [ 'mod_ssi_exprparser.c', 'mod_ssi_expr.c', 'mod_ssi.c' ], 'lib' : [ env['LIBPCRE'] ] },
+	'mod_flv_streaming' : { 'src' : [ 'mod_flv_streaming.c' ] },
+	'mod_cml': {
+		'src' : [ 'mod_cml_lua.c', 'mod_cml.c', 'mod_cml_funcs.c' ],
+		'lib' : [ env['LIBPCRE'], env['LIBMEMCACHE'], env['LIBLUA'] ] 
+	},
 }
 
-if env['with_maxminddb']:
-	modules['mod_maxminddb'] = { 'src' : [ 'mod_maxminddb.c' ], 'lib' : [ env['LIBMAXMINDDB'] ] }
-
-if env['with_krb5']:
-	modules['mod_authn_gssapi'] = { 'src' : [ 'mod_authn_gssapi.c' ], 'lib' : [ env['LIBKRB5'], env['LIBGSSAPI_KRB5'] ] }
-
-if env['with_ldap']:
-	modules['mod_authn_ldap'] = { 'src' : [ 'mod_authn_ldap.c' ], 'lib' : [ env['LIBLDAP'], env['LIBLBER'] ] }
-	modules['mod_vhostdb_ldap'] = { 'src' : [ 'mod_vhostdb_ldap.c' ], 'lib' : [ env['LIBLDAP'], env['LIBLBER'] ] }
+if env['with_memcache']:
+	modules[mod_trigger_b4_dl] = { 'src' : [ 'mod_trigger_b4_dl.c' ], 'lib' : [ env['LIBPCRE'], env['LIBMEMCACHE'] ] }
 
 if env['with_lua']:
-	modules['mod_magnet'] = {
-		'src' : [ 'mod_magnet.c', 'mod_magnet_cache.c', 'algo_hmac.c' ],
-		'lib' : [ env['LIBLUA'], env['LIBCRYPTO'] ]
-	}
-
-if env['with_pam']:
-	modules['mod_authn_pam'] = { 'src' : [ 'mod_authn_pam.c' ], 'lib' : [ env['LIBPAM'] ] }
-
-if env['with_mysql']:
-	modules['mod_vhostdb_mysql'] = { 'src' : [ 'mod_vhostdb_mysql.c' ], 'lib' : [ env['LIBMYSQL'] ] }
-
-if env['with_pgsql']:
-	modules['mod_vhostdb_pgsql'] = { 'src' : [ 'mod_vhostdb_pgsql.c' ], 'lib' : [ env['LIBPGSQL'] ] }
-
-if env['with_dbi']:
-	modules['mod_authn_dbi'] = { 'src' : [ 'mod_authn_dbi.c' ], 'lib' : [ env['LIBCRYPT'], env['LIBDBI'], env['LIBCRYPTO'] ] }
-	modules['mod_vhostdb_dbi'] = { 'src' : [ 'mod_vhostdb_dbi.c' ], 'lib' : [ env['LIBDBI'] ] }
-
-if env['with_sasl']:
-	modules['mod_authn_sasl'] = { 'src' : [ 'mod_authn_sasl.c' ], 'lib' : [ env['LIBSASL'] ] }
-
-if env['with_openssl']:
-	modules['mod_openssl'] = { 'src' : [ 'mod_openssl.c' ], 'lib' : [ env['LIBSSL'], env['LIBSSLCRYPTO'] ] }
-
-if env['with_wolfssl']:
-	modules['mod_wolfssl'] = { 'src' : [ 'mod_wolfssl.c' ], 'lib' : [ env['LIBWOLFSSL'], 'm' ] }
-
-if env['with_mbedtls']:
-	modules['mod_mbedtls'] = { 'src' : [ 'mod_mbedtls.c' ], 'lib' : [ env['LIBMBEDTLS'], env['LIBMBEDX509'], env['LIBMBEDCRYPTO'] ] }
-
-if env['with_nss']:
-	modules['mod_nss'] = { 'src' : [ 'mod_nss.c' ], 'lib' : [ env['LIBNSS'] ] }
-
-if env['with_gnutls']:
-	modules['mod_gnutls'] = { 'src' : [ 'mod_gnutls.c' ], 'lib' : [ env['LIBGNUTLS'] ] }
+	modules['mod_magnet'] = { 'src' : [ 'mod_magnet.c', 'mod_magnet_cache.c' ], 'lib' : [ env['LIBLUA'] ] }
 
 staticenv = env.Clone(CPPFLAGS=[ env['CPPFLAGS'], '-DLIGHTTPD_STATIC' ])
 
 ## all the core-sources + the modules
 staticsrc = src + common_src
 
-staticlib = copy(env['LIBS'])
+staticlib = env['LIBS']
 staticinit = ''
-staticsrc += builtin_mods
-for module in builtin_mods:
-	staticinit += "PLUGIN_INIT(%s)\n"%module[0:-2]
 for module in modules.keys():
 	staticsrc += modules[module]['src']
 	staticinit += "PLUGIN_INIT(%s)\n"%module
-	if 'lib' in modules[module]:
+	if modules[module].has_key('lib'):
 		staticlib += modules[module]['lib']
 
 def WriteStaticPluginHeader(target, source, env):
@@ -222,7 +162,7 @@ env.Depends(static_plugin_obj, 'plugin-static.h')
 ## includes all modules, but links dynamically against other libs
 staticbin = staticenv.Program('../static/build/lighttpd',
 	staticobj,
-	LIBS = GatherLibs(env, env['LIBPCRE'], staticlib)
+	LIBS = GatherLibs(env, staticlib)
 	)
 
 ## you might have to adjust the list of libs and the order for your setup
@@ -243,7 +183,7 @@ f.close
 
 lddre = re.compile(r'^\s+lib([^=-]+)(?:-[\.0-9]+)?\.so\.[0-9]+ =>', re.MULTILINE)
 for libs in staticlib:
-	if isinstance(libs, string_types): libs = [ libs ]
+	if type(libs) is types.StringType: libs = [ libs ]
 	for lib in libs:
 		fullstaticlib += [ lib ]
 		solibpath = WhereIsFile('lib' + lib + '.so', paths = searchlibs)
@@ -255,24 +195,11 @@ for libs in staticlib:
 			fullstaticlib += [ aword ]
 		f.close
 
-## glibc pthread needs to be linked completely (especially nptl-init.o)
-## or not at all, or else pthread structures may not be initialized correctly
-import platform
-fullstatic_libs = GatherLibs(env, env['LIBPCRE'], fullstaticlib)
-fullstatic_linkflags = [staticenv['LINKFLAGS'], '-static']
-if (('pthread' in fullstatic_libs) or ('pcre' in fullstatic_libs)) and (platform.system() == 'Linux'):
-	fullstatic_linkflags += ['-Wl,--whole-archive','-lpthread','-Wl,--no-whole-archive']
-	if 'pthread' in fullstatic_libs:
-		fullstatic_libs.remove('pthread')
-if 'gcc_s' in fullstatic_libs:
-	fullstatic_linkflags += ['-static-libgcc']
-	fullstatic_libs.remove('gcc_s')
-
 ## includes all modules, linked statically
 fullstaticbin = staticenv.Program('../fullstatic/build/lighttpd',
 	staticobj,
-	LIBS = fullstatic_libs,
-	LINKFLAGS= fullstatic_linkflags
+	LIBS = GatherLibs(env, fullstaticlib),
+	LINKFLAGS= [staticenv['LINKFLAGS'], '-static']
 	)
 
 Alias('static', staticbin)
@@ -292,16 +219,7 @@ else:
 	else:
 		bin_linkflags += [ '-Wl,--export-dynamic' ]
 
-instbin = env.Program(bin_targets, src + builtin_mods, LINKFLAGS = bin_linkflags,
-	LIBS = GatherLibs(
-		env,
-		common_lib,
-		env['LIBCRYPTO'],
-		env['LIBDL'],
-		env['LIBPCRE'],
-		env['LIBXXHASH'],
-	)
-)
+instbin = env.Program(bin_targets, src, LINKFLAGS = bin_linkflags, LIBS = GatherLibs(env, env['LIBS'], common_lib, env['LIBDL']))
 env.Depends(instbin, configparser)
 
 if env['COMMON_LIB'] == 'bin':
@@ -311,9 +229,9 @@ env['SHLIBPREFIX'] = ''
 instlib = []
 for module in modules.keys():
 	libs = [ common_lib ]
-	if 'lib' in modules[module]:
+	if modules[module].has_key('lib'):
 		libs +=  modules[module]['lib']
-	instlib += env.SharedLibrary(module, modules[module]['src'], LIBS = GatherLibs(env, libs))
+	instlib += env.SharedLibrary(module, modules[module]['src'], LIBS= GatherLibs(env, libs))
 env.Alias('modules', instlib)
 
 inst = []

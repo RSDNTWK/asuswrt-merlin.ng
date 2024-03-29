@@ -1,319 +1,371 @@
-#include "first.h"
-
 #include "base.h"
-#include "array.h"
-#include "buffer.h"
 #include "log.h"
-#include "http_date.h"
-#include "http_header.h"
+#include "buffer.h"
+#include "response.h"
 
 #include "plugin.h"
 #include "stat_cache.h"
 
-#include "sys-time.h"
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /**
- * set HTTP headers Cache-Control and Expires
+ * this is a expire module for a lighttpd
+ *
+ * set 'Expires:' HTTP Headers on demand
  */
 
+
+
+/* plugin config for all request/connections */
+
 typedef struct {
-    const array *expire_url;
-    const array *expire_mimetypes;
+	array *expire_url;
 } plugin_config;
 
 typedef struct {
-    PLUGIN_DATA;
-    plugin_config defaults;
-    plugin_config conf;
-    time_t *toffsets;
-    uint32_t tused;
+	PLUGIN_DATA;
+
+	buffer *expire_tstmp;
+
+	plugin_config **config_storage;
+
+	plugin_config conf;
 } plugin_data;
 
+/* init the plugin data */
 INIT_FUNC(mod_expire_init) {
-    return ck_calloc(1, sizeof(plugin_data));
+	plugin_data *p;
+
+	p = calloc(1, sizeof(*p));
+
+	p->expire_tstmp = buffer_init();
+
+	buffer_string_prepare_copy(p->expire_tstmp, 255);
+
+	return p;
 }
 
+/* detroy the plugin data */
 FREE_FUNC(mod_expire_free) {
-    plugin_data * const p = p_d;
-    free(p->toffsets);
-}
-
-__attribute_noinline__
-static time_t mod_expire_get_offset (const char *ts, time_t *mod) {
-    /* (access|now|modification) [plus] {<num> <unit>}*
-     * e.g. 'access 3 months' */
-
-    *mod = 0;
-    if (0 == strncmp(ts, "access ", 7))
-        ts   += 7;
-    else if (0 == strncmp(ts, "now ", 4))
-        ts   += 4;
-    else if ((*mod = (0 == strncmp(ts, "modification ", 13))))
-        ts   += 13;
-    else
-        return (*mod = -1);
-
-    if (0 == strncmp(ts, "plus ", 5))
-        ts   += 5; /* skip optional plus */
-
-    static const struct expire_units {
-      const char *str;
-      uint32_t len;
-      int32_t mult;
-    } expire_units[] = { /*(list longest match first)*/
-      { "year",   sizeof("year")-1,   60 * 60 * 24 * 365 }
-     ,{ "month",  sizeof("month")-1,  60 * 60 * 24 * 30 }
-     ,{ "week",   sizeof("week")-1,   60 * 60 * 24 * 7 }
-     ,{ "day",    sizeof("day")-1,    60 * 60 * 24 }
-     ,{ "hour",   sizeof("hour")-1,   60 * 60 }
-     ,{ "minute", sizeof("minute")-1, 60 }
-     ,{ "min",    sizeof("min")-1,    60 }
-     ,{ "second", sizeof("second")-1, 1 }
-     ,{ "sec",    sizeof("sec")-1,    1 }
-     ,{ NULL,     0,                  0 }
-    };
-
-    /* <num> (years|months|weeks|days|hours|minutes|seconds) */
-    time_t offset = 0;
-    do {
-        /*(note: not checking num validity; missing num treated as 0)*/
-        /*(note: not enforcing space between nums and units)*/
-        char *err;
-        long num = strtol(ts, &err, 10);
-        ts = err;
-        while (*ts == ' ') ++ts;
-        const struct expire_units *units = expire_units;
-        while (units->str && 0 != strncmp(ts, units->str, units->len)) ++units;
-        if (units->str == NULL)
-            return (*mod = -1);
-        offset += num * units->mult;
-        ts += units->len;
-        if (*ts == 's') ++ts; /* strip plural */
-        while (*ts == ' ') ++ts;
-    } while (*ts);
-    return offset;
-}
-
-static void mod_expire_merge_config_cpv(plugin_config * const pconf, const config_plugin_value_t * const cpv) {
-    switch (cpv->k_id) { /* index into static config_plugin_keys_t cpk[] */
-      case 0: /* expire.url */
-        pconf->expire_url = cpv->v.a;
-        break;
-      case 1: /* expire.mimetypes */
-        pconf->expire_mimetypes = cpv->v.a;
-        break;
-      default:/* should not happen */
-        return;
-    }
-}
-
-static void mod_expire_merge_config(plugin_config * const pconf, const config_plugin_value_t *cpv) {
-    do {
-        mod_expire_merge_config_cpv(pconf, cpv);
-    } while ((++cpv)->k_id != -1);
-}
-
-static void mod_expire_patch_config(request_st * const r, plugin_data * const p) {
-    p->conf = p->defaults; /* copy small struct instead of memcpy() */
-    /*memcpy(&p->conf, &p->defaults, sizeof(plugin_config));*/
-    for (int i = 1, used = p->nconfig; i < used; ++i) {
-        if (config_check_cond(r, (uint32_t)p->cvlist[i].k_id))
-            mod_expire_merge_config(&p->conf, p->cvlist + p->cvlist[i].v.u2[0]);
-    }
-}
-
-SETDEFAULTS_FUNC(mod_expire_set_defaults) {
-    static const config_plugin_keys_t cpk[] = {
-      { CONST_STR_LEN("expire.url"),
-        T_CONFIG_ARRAY_KVSTRING,
-        T_CONFIG_SCOPE_CONNECTION }
-     ,{ CONST_STR_LEN("expire.mimetypes"),
-        T_CONFIG_ARRAY_KVSTRING,
-        T_CONFIG_SCOPE_CONNECTION }
-     ,{ NULL, 0,
-        T_CONFIG_UNSET,
-        T_CONFIG_SCOPE_UNSET }
-    };
-
-    plugin_data * const p = p_d;
-    if (!config_plugin_values_init(srv, p, cpk, "mod_expire"))
-        return HANDLER_ERROR;
-
-    /* process and validate config directives
-     * (init i to 0 if global context; to 1 to skip empty global context) */
-    for (int i = !p->cvlist[0].v.u2[1]; i < p->nconfig; ++i) {
-        const config_plugin_value_t *cpv = p->cvlist + p->cvlist[i].v.u2[0];
-        for (; -1 != cpv->k_id; ++cpv) {
-            const array *a = NULL;
-            switch (cpv->k_id) {
-              case 0: /* expire.url */
-                a = cpv->v.a;
-                break;
-              case 1: /* expire.mimetypes */
-                for (uint32_t k = 0; k < cpv->v.a->used; ++k) {
-                    data_string *ds = (data_string *)cpv->v.a->data[k];
-                    /*(omit trailing '*', if present, from prefix match)*/
-                    /*(not usually a good idea to modify array keys
-                     * since doing so might break array_get_element_klen()
-                     * search; config should be consistent in using * or not)*/
-                    size_t klen = buffer_clen(&ds->key);
-                    if (klen && ds->key.ptr[klen-1] == '*')
-                        buffer_truncate(&ds->key, klen-1);
-                }
-                a = cpv->v.a;
-                if (!array_get_element_klen(a, CONST_STR_LEN("text/javascript"))
-                    && !array_get_element_klen(a, CONST_STR_LEN("text/"))) {
-                    array *m;
-                    *(const array **)&m = a;
-                    data_unset * const du =
-                      array_extract_element_klen(m,
-                        CONST_STR_LEN("application/javascript"));
-                    if (du) {
-                        buffer_copy_string_len(&du->key, "text/javascript", 15);
-                        array_replace(m, du);
-                    }
-                }
-                break;
-              default:/* should not happen */
-                continue;
-            }
-
-            /* parse array values into structured data */
-            if (NULL != a && a->used) {
-                ck_realloc_u32((void **)&p->toffsets, p->tused,
-                               a->used*2, sizeof(*p->toffsets));
-                time_t *toff = p->toffsets + p->tused;
-                for (uint32_t k = 0; k < a->used; ++k, toff+=2, p->tused+=2) {
-                    buffer *v = &((data_string *)a->data[k])->value;
-                    toff[1] = mod_expire_get_offset(v->ptr, &toff[0]);
-                    if (-1 == *toff) {
-                        log_error(srv->errh, __FILE__, __LINE__,
-                          "invalid %s = \"%s\"", cpk[cpv->k_id].k, v->ptr);
-                        return HANDLER_ERROR;
-                    }
-                    /* overwrite v->used with offset int p->toffsets
-                     * as v->ptr is not used by this module after config */
-                    v->used = (uint32_t)p->tused;
-                }
-            }
-        }
-    }
-
-    /* initialize p->defaults from global config context */
-    if (p->nconfig > 0 && p->cvlist->v.u2[1]) {
-        const config_plugin_value_t *cpv = p->cvlist + p->cvlist->v.u2[0];
-        if (-1 != cpv->k_id)
-            mod_expire_merge_config(&p->defaults, cpv);
-    }
-
-    return HANDLER_GO_ON;
-}
-
-static handler_t
-mod_expire_set_header (request_st * const r, const time_t * const off)
-{
-    const unix_time64_t cur_ts = log_epoch_secs;
-    unix_time64_t expires = off[1];
-    if (0 == off[0]) { /* access */
-        expires += cur_ts;
-    }
-    else {             /* modification */
-      #if 1
-        const stat_cache_st * const st = stat_cache_path_stat(&r->physical.path);
-      #else
-        /* do not use r->tmp_sce here; r->tmp_sce could have been
-         * invalidated between request start and response start */
-        const stat_cache_st * const st =
-	  (r->tmp_sce && buffer_is_equal(&r->tmp_sce->name, &r->physical.path))
-	  ? &r->tmp_sce->st
-	  : stat_cache_path_stat(&r->physical.path);
-      #endif
-        /* can't set modification-based expire if mtime is not available */
-        if (NULL == st) return HANDLER_GO_ON;
-        expires += TIME64_CAST(st->st_mtime);
-        /* expires should be at least cur_ts */
-        if (expires < cur_ts) expires = cur_ts;
-    }
-
-    /* HTTP/1.1 dictates that Cache-Control overrides Expires if both present.
-     * Therefore, send only Cache-Control to HTTP/1.1 requests.  This means
-     * that if an intermediary upgraded the request to HTTP/1.1, and the actual
-     * client sent HTTP/1.0, then the actual client might not understand
-     * Cache-Control when it may have understood Expires.  RFC 2616 HTTP/1.1
-     * was released June 1999, almost 22 years ago (as this comment is written).
-     * If a client today is sending HTTP/1.0, chances are the client does not
-     * cache.  Avoid the overhead of formatting time for Expires to send both
-     * Cache-Control and Expires when the majority of clients are HTTP/1.1 or
-     * HTTP/2 (or later). */
-    buffer *vb;
-    if (r->http_version > HTTP_VERSION_1_0) {
-        vb = http_header_response_set_ptr(r, HTTP_HEADER_CACHE_CONTROL,
-                                          CONST_STR_LEN("Cache-Control"));
-        buffer_append_string_len(vb, CONST_STR_LEN("max-age="));
-        buffer_append_int(vb, expires - cur_ts);
-    }
-    else { /* HTTP/1.0 */
-        vb = http_header_response_set_ptr(r, HTTP_HEADER_EXPIRES,
-                                          CONST_STR_LEN("Expires"));
-        http_date_time_append(vb, expires);
-    }
-
-    return HANDLER_GO_ON;
-}
-
-REQUEST_FUNC(mod_expire_handler) {
 	plugin_data *p = p_d;
-	buffer *vb;
-	const data_string *ds;
 
-	/* Add caching headers only to http_status
-	 * 200 OK or 204 No Content or 206 Partial Content */
-	if (r->http_status != 200 && r->http_status != 204 && r->http_status != 206)
-		return HANDLER_GO_ON;
-	/* Add caching headers only to GET, HEAD, QUERY requests */
-	if (!http_method_get_head_query(r->http_method)) return HANDLER_GO_ON;
-	/* Add caching headers only if not already present */
-	if (light_btst(r->resp_htags, HTTP_HEADER_CACHE_CONTROL))
-		return HANDLER_GO_ON;
+	UNUSED(srv);
 
-	mod_expire_patch_config(r, p);
+	if (!p) return HANDLER_GO_ON;
 
-	/* check expire.url */
-	ds = p->conf.expire_url
-	  ? (const data_string *)array_match_key_prefix(p->conf.expire_url, &r->uri.path)
-	  : NULL;
-	/* check expire.mimetypes (if no match with expire.url) */
-	if (NULL == ds) {
-		if (NULL == p->conf.expire_mimetypes) return HANDLER_GO_ON;
-		vb = http_header_response_get(r, HTTP_HEADER_CONTENT_TYPE, CONST_STR_LEN("Content-Type"));
-		if (NULL != vb)
-			ds = (const data_string *)
-			     array_match_key_prefix(p->conf.expire_mimetypes, vb);
-		if (NULL == ds) {
-			ds = (const data_string *)
-			     array_get_element_klen(p->conf.expire_mimetypes,
-			                            CONST_STR_LEN(""));
-			if (NULL == ds) return HANDLER_GO_ON;
+	buffer_free(p->expire_tstmp);
+
+	if (p->config_storage) {
+		size_t i;
+		for (i = 0; i < srv->config_context->used; i++) {
+			plugin_config *s = p->config_storage[i];
+
+			if (NULL == s) continue;
+
+			array_free(s->expire_url);
+			free(s);
+		}
+		free(p->config_storage);
+	}
+
+	free(p);
+
+	return HANDLER_GO_ON;
+}
+
+static int mod_expire_get_offset(server *srv, plugin_data *p, buffer *expire, time_t *offset) {
+	char *ts;
+	int type = -1;
+	time_t retts = 0;
+
+	UNUSED(p);
+
+	/*
+	 * parse
+	 *
+	 * '(access|now|modification) [plus] {<num> <type>}*'
+	 *
+	 * e.g. 'access 1 years'
+	 */
+
+	if (buffer_string_is_empty(expire)) {
+		log_error_write(srv, __FILE__, __LINE__, "s",
+				"empty:");
+		return -1;
+	}
+
+	ts = expire->ptr;
+
+	if (0 == strncmp(ts, "access ", 7)) {
+		type  = 0;
+		ts   += 7;
+	} else if (0 == strncmp(ts, "now ", 4)) {
+		type  = 0;
+		ts   += 4;
+	} else if (0 == strncmp(ts, "modification ", 13)) {
+		type  = 1;
+		ts   += 13;
+	} else {
+		/* invalid type-prefix */
+		log_error_write(srv, __FILE__, __LINE__, "ss",
+				"invalid <base>:", ts);
+		return -1;
+	}
+
+	if (0 == strncmp(ts, "plus ", 5)) {
+		/* skip the optional plus */
+		ts   += 5;
+	}
+
+	/* the rest is just <number> (years|months|weeks|days|hours|minutes|seconds) */
+	while (1) {
+		char *space, *err;
+		int num;
+
+		if (NULL == (space = strchr(ts, ' '))) {
+			log_error_write(srv, __FILE__, __LINE__, "ss",
+					"missing space after <num>:", ts);
+			return -1;
+		}
+
+		num = strtol(ts, &err, 10);
+		if (*err != ' ') {
+			log_error_write(srv, __FILE__, __LINE__, "ss",
+					"missing <type> after <num>:", ts);
+			return -1;
+		}
+
+		ts = space + 1;
+
+		if (NULL != (space = strchr(ts, ' '))) {
+			int slen;
+			/* */
+
+			slen = space - ts;
+
+			if (slen == 5 &&
+			    0 == strncmp(ts, "years", slen)) {
+				num *= 60 * 60 * 24 * 30 * 12;
+			} else if (slen == 6 &&
+				   0 == strncmp(ts, "months", slen)) {
+				num *= 60 * 60 * 24 * 30;
+			} else if (slen == 5 &&
+				   0 == strncmp(ts, "weeks", slen)) {
+				num *= 60 * 60 * 24 * 7;
+			} else if (slen == 4 &&
+				   0 == strncmp(ts, "days", slen)) {
+				num *= 60 * 60 * 24;
+			} else if (slen == 5 &&
+				   0 == strncmp(ts, "hours", slen)) {
+				num *= 60 * 60;
+			} else if (slen == 7 &&
+				   0 == strncmp(ts, "minutes", slen)) {
+				num *= 60;
+			} else if (slen == 7 &&
+				   0 == strncmp(ts, "seconds", slen)) {
+				num *= 1;
+			} else {
+				log_error_write(srv, __FILE__, __LINE__, "ss",
+						"unknown type:", ts);
+				return -1;
+			}
+
+			retts += num;
+
+			ts = space + 1;
+		} else {
+			if (0 == strcmp(ts, "years")) {
+				num *= 60 * 60 * 24 * 30 * 12;
+			} else if (0 == strcmp(ts, "months")) {
+				num *= 60 * 60 * 24 * 30;
+			} else if (0 == strcmp(ts, "weeks")) {
+				num *= 60 * 60 * 24 * 7;
+			} else if (0 == strcmp(ts, "days")) {
+				num *= 60 * 60 * 24;
+			} else if (0 == strcmp(ts, "hours")) {
+				num *= 60 * 60;
+			} else if (0 == strcmp(ts, "minutes")) {
+				num *= 60;
+			} else if (0 == strcmp(ts, "seconds")) {
+				num *= 1;
+			} else {
+				log_error_write(srv, __FILE__, __LINE__, "ss",
+						"unknown type:", ts);
+				return -1;
+			}
+
+			retts += num;
+
+			break;
 		}
 	}
 
-	return mod_expire_set_header(r, p->toffsets + ds->value.used);
+	if (offset != NULL) *offset = retts;
+
+	return type;
 }
 
 
-__attribute_cold__
-__declspec_dllexport__
+/* handle plugin config and check values */
+
+SETDEFAULTS_FUNC(mod_expire_set_defaults) {
+	plugin_data *p = p_d;
+	size_t i = 0, k;
+
+	config_values_t cv[] = {
+		{ "expire.url",                 NULL, T_CONFIG_ARRAY, T_CONFIG_SCOPE_CONNECTION },       /* 0 */
+		{ NULL,                         NULL, T_CONFIG_UNSET, T_CONFIG_SCOPE_UNSET }
+	};
+
+	if (!p) return HANDLER_ERROR;
+
+	p->config_storage = calloc(1, srv->config_context->used * sizeof(plugin_config *));
+
+	for (i = 0; i < srv->config_context->used; i++) {
+		data_config const* config = (data_config const*)srv->config_context->data[i];
+		plugin_config *s;
+
+		s = calloc(1, sizeof(plugin_config));
+		s->expire_url    = array_init();
+
+		cv[0].destination = s->expire_url;
+
+		p->config_storage[i] = s;
+
+		if (0 != config_insert_values_global(srv, config->value, cv, i == 0 ? T_CONFIG_SCOPE_SERVER : T_CONFIG_SCOPE_CONNECTION)) {
+			return HANDLER_ERROR;
+		}
+
+		for (k = 0; k < s->expire_url->used; k++) {
+			data_string *ds = (data_string *)s->expire_url->data[k];
+
+			/* parse lines */
+			if (-1 == mod_expire_get_offset(srv, p, ds->value, NULL)) {
+				log_error_write(srv, __FILE__, __LINE__, "sb",
+						"parsing expire.url failed:", ds->value);
+				return HANDLER_ERROR;
+			}
+		}
+	}
+
+
+	return HANDLER_GO_ON;
+}
+
+#define PATCH(x) \
+	p->conf.x = s->x;
+static int mod_expire_patch_connection(server *srv, connection *con, plugin_data *p) {
+	size_t i, j;
+	plugin_config *s = p->config_storage[0];
+
+	PATCH(expire_url);
+
+	/* skip the first, the global context */
+	for (i = 1; i < srv->config_context->used; i++) {
+		data_config *dc = (data_config *)srv->config_context->data[i];
+		s = p->config_storage[i];
+
+		/* condition didn't match */
+		if (!config_check_cond(srv, con, dc)) continue;
+
+		/* merge config */
+		for (j = 0; j < dc->value->used; j++) {
+			data_unset *du = dc->value->data[j];
+
+			if (buffer_is_equal_string(du->key, CONST_STR_LEN("expire.url"))) {
+				PATCH(expire_url);
+			}
+		}
+	}
+
+	return 0;
+}
+#undef PATCH
+
+URIHANDLER_FUNC(mod_expire_path_handler) {
+	plugin_data *p = p_d;
+	int s_len;
+	size_t k;
+
+	if (buffer_is_empty(con->uri.path)) return HANDLER_GO_ON;
+
+	mod_expire_patch_connection(srv, con, p);
+
+	s_len = buffer_string_length(con->uri.path);
+
+	for (k = 0; k < p->conf.expire_url->used; k++) {
+		data_string *ds = (data_string *)p->conf.expire_url->data[k];
+		int ct_len = buffer_string_length(ds->key);
+
+		if (ct_len > s_len) continue;
+		if (buffer_is_empty(ds->key)) continue;
+
+		if (0 == strncmp(con->uri.path->ptr, ds->key->ptr, ct_len)) {
+			time_t ts, expires;
+			stat_cache_entry *sce = NULL;
+
+			/* if stat fails => sce == NULL, ignore return value */
+			(void) stat_cache_get_entry(srv, con, con->physical.path, &sce);
+
+			switch(mod_expire_get_offset(srv, p, ds->value, &ts)) {
+			case 0:
+				/* access */
+				expires = (ts + srv->cur_ts);
+				break;
+			case 1:
+				/* modification */
+
+				/* can't set modification based expire header if
+				 * mtime is not available
+				 */
+				if (NULL == sce) return HANDLER_GO_ON;
+
+				expires = (ts + sce->st.st_mtime);
+				break;
+			default:
+				/* -1 is handled at parse-time */
+				return HANDLER_ERROR;
+			}
+
+			/* expires should be at least srv->cur_ts */
+			if (expires < srv->cur_ts) expires = srv->cur_ts;
+
+			buffer_string_prepare_copy(p->expire_tstmp, 255);
+			buffer_append_strftime(p->expire_tstmp, "%a, %d %b %Y %H:%M:%S GMT", gmtime(&(expires)));
+
+			/* HTTP/1.0 */
+			response_header_overwrite(srv, con, CONST_STR_LEN("Expires"), CONST_BUF_LEN(p->expire_tstmp));
+
+			/* HTTP/1.1 */
+			buffer_copy_string_len(p->expire_tstmp, CONST_STR_LEN("max-age="));
+			buffer_append_int(p->expire_tstmp, expires - srv->cur_ts); /* as expires >= srv->cur_ts the difference is >= 0 */
+
+			response_header_append(srv, con, CONST_STR_LEN("Cache-Control"), CONST_BUF_LEN(p->expire_tstmp));
+
+			return HANDLER_GO_ON;
+		}
+	}
+
+	/* not found */
+	return HANDLER_GO_ON;
+}
+
+/* this function is called at dlopen() time and inits the callbacks */
+
 int mod_expire_plugin_init(plugin *p);
 int mod_expire_plugin_init(plugin *p) {
 	p->version     = LIGHTTPD_VERSION_ID;
-	p->name        = "expire";
+	p->name        = buffer_init_string("expire");
 
 	p->init        = mod_expire_init;
+	p->handle_subrequest_start = mod_expire_path_handler;
+	p->set_defaults  = mod_expire_set_defaults;
 	p->cleanup     = mod_expire_free;
-	p->set_defaults= mod_expire_set_defaults;
-	p->handle_response_start = mod_expire_handler;
+
+	p->data        = NULL;
 
 	return 0;
 }

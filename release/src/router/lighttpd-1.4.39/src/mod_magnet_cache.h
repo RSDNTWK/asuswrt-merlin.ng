@@ -1,41 +1,33 @@
 #ifndef _MOD_MAGNET_CACHE_H_
 #define _MOD_MAGNET_CACHE_H_
-#include "first.h"
 
-#include "base_decls.h"
 #include "buffer.h"
+#include "base.h"
 
+#ifdef HAVE_LUA_H
 #include <lua.h>
 
 typedef struct {
-	buffer name;
-	buffer etag;
+	buffer *name;
+	buffer *etag;
 
 	lua_State *L;
-	int req_env_init;
+
+	time_t last_used; /* LRU */
 } script;
 
 typedef struct {
 	script **ptr;
-	uint32_t used;
+
+	size_t used;
+	size_t size;
 } script_cache;
 
-#if 0
-__attribute_cold__
-__attribute_malloc__
-__attribute_returns_nonnull__
 script_cache *script_cache_init(void);
+void script_cache_free(script_cache *cache);
+
+lua_State *script_cache_get_script(server *srv, connection *con,
+	       	script_cache *cache, buffer *name);
+
 #endif
-
-__attribute_cold__
-void script_cache_free_data(script_cache *cache);
-
-__attribute_cold__
-__attribute_nonnull__()
-__attribute_returns_nonnull__
-script *script_cache_get_script(script_cache *cache, const buffer *name);
-
-__attribute_nonnull__()
-lua_State *script_cache_check_script(script * const sc, int etag_flags);
-
 #endif

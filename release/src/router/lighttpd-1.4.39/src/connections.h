@@ -1,23 +1,19 @@
 #ifndef _CONNECTIONS_H_
 #define _CONNECTIONS_H_
-#include "first.h"
 
-#include "base_decls.h"
+#include "server.h"
+#include "fdevent.h"
 
-struct server_socket;   /* declaration */
-
-void connections_pool_clear(server *srv);
-
-__attribute_cold__
+connection *connection_init(server *srv);
+int connection_reset(server *srv, connection *con);
 void connections_free(server *srv);
 
-__attribute_cold__
-void connection_graceful_shutdown_maint (server *srv);
+connection * connection_accept(server *srv, server_socket *srv_sock);
+int connection_close(server *srv, connection *con);
 
-void connection_periodic_maint (server *srv, unix_time64_t cur_ts);
-
-connection * connection_accepted(server *srv, const struct server_socket *srv_socket, sock_addr *cnt_addr, int cnt);
-
-void connection_state_machine(connection *con);
+int connection_set_state(server *srv, connection *con, connection_state_t state);
+const char * connection_get_state(connection_state_t state);
+const char * connection_get_short_state(connection_state_t state);
+int connection_state_machine(server *srv, connection *con);
 
 #endif
