@@ -6750,8 +6750,7 @@ curl/Makefile: curl/configure
 		CFLAGS="$(if $(RTCONFIG_DEBUG),-g,-Os) -Wall -ffunction-sections -fdata-sections" \
 		CPPFLAGS="-I$(STAGEDIR)/usr/include" \
 		comma="," \
-		LDFLAGS="-Wl$(if $(RTCONFIG_TR069),$(comma)-rpath-link=$(STAGEDIR)/usr/lib,),--gc-sections \
-			   -Wl$(if $(RTCONFIG_TR069),$(comma)-rpath=$(STAGEDIR)/usr/lib,),--gc-sections \
+		LDFLAGS="--gc-sections \
 			   $(LDFLAGS) -L$(STAGEDIR)/usr/lib -L$(SRCBASE)/router/openssl-1.1" \
 		LIBS="-ldl -lpthread \
 			   -L$(SRCBASE)/router/openssl-1.1 -lcrypto -lssl"
