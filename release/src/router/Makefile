@@ -5191,11 +5191,11 @@ endif
 ifeq ($(RTCONFIG_OPENSSL11),y)
 	install -d $(INSTALLDIR)/wtfast/usr/lib
 ifeq ($(HND_ROUTER),y)
-	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libcrypto.so.3 libcrypto.so.1.0.0
+	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libcrypto.so.1.1 libcrypto.so.1.0.0
 else
 	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf ../../lib/libpthread.so.0 libcrypto.so.1.0.0
 endif
-	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libssl.so.3 libssl.so.1.0.0
+	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libssl.so.1.1 libssl.so.1.0.0
 endif
 
 # Media libraries
