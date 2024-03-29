@@ -3080,6 +3080,8 @@ openssl: $(OPENSSL)/Makefile $(if $(filter y,$(HND_ROUTER)),fsbuild,)
 	@$(SEP)
 	[ "$(notdir $(realpath $@))" = "$(OPENSSL)" ] || (rm -f $@ && ln -s $(OPENSSL) $@)
 	$(MAKE) $(OPENSSL)
+	rm -f openssl
+	ln -s openssl-3.0 openssl
 
 openssl-clean:
 	@$(MAKE) $(OPENSSL)-clean
@@ -3167,6 +3169,8 @@ openssl-1.1-stage:
 ifeq ($(RTCONFIG_OPENSSL11),y)
 	$(MAKE) -C openssl-1.1 install_sw DESTDIR=$(STAGEDIR)
 	$(MAKE) -C openssl-3.0 install_sw DESTDIR=$(STAGEDIR)
+	rm -f openssl
+	ln -s openssl-3.0 openssl
 else
 	@true
 endif
