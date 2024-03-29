@@ -686,7 +686,7 @@ OBJS += monitor.o
 endif
 
 CFLAGS += -I$(TOP)/curl/include
-LDFLAGS += -L$(TOP)/curl/lib/.libs -lcurl -rpath-link=$(STAGEDIR)/usr/lib -lssl -lcrypto
+LDFLAGS += -L$(TOP)/curl/lib/.libs -lcurl
 ifeq ($(or $(RTCONFIG_FRS_LIVE_UPDATE),$(RTCONFIG_FRS_FEEDBACK),$(RTCONFIG_URLFW),$(RTCONFIG_SOFTWIRE46)),y)
 ifeq ($(RTCONFIG_TR069),y)
 CFLAGS += -I$(TOP)/libssh2-1.10.0/include -I$(TOP)/zlib/include
@@ -912,7 +912,7 @@ endif
 CFLAGS += -I$(TOP)/acsd$(BCMEX)$(EX7)
 CFLAGS  += -I$(TOP)/sqlite
 LDFLAGS2 += -L$(TOP)/sqlite/.libs -lsqlite3
-LDFLAGS2 += -L. -lconn_diag -rpath-link=$(STAGEDIR)/usr/lib -lssl -lcrypto
+LDFLAGS2 += -L. -lconn_diag
 
 OBJS += conn_diag.o
 ifeq ($(CONFIG_BCMWL5),y)
@@ -1970,8 +1970,8 @@ libconn_diag.so:
 		fi \
 	done
 ifeq ($(HND_ROUTER_AX),y)
-	$(LD) -L$(TOP_PLATFORM)/nvram -lnvram -rpath-link=$(STAGEDIR)/usr/lib -lssl -lcrypto -L$(TOP)/shared -lshared -shared $(if $(RTCONFIG_BCM_502L07P2),-L$(TOP_PLATFORM)/ethctl_lib -lethctl) -o $@ $(DIAG_OBJS)
+	$(LD) -L$(TOP_PLATFORM)/nvram -lnvram -rpath=$(STAGEDIR)/usr/lib -lssl -lcrypto -L$(TOP)/shared -lshared -shared $(if $(RTCONFIG_BCM_502L07P2),-L$(TOP_PLATFORM)/ethctl_lib -lethctl) -o $@ $(DIAG_OBJS)
 else
-	$(LD) -L$(TOP)/nvram${BCMEX}${EX7} -lnvram -rpath-link=$(STAGEDIR)/usr/lib -lssl -lcrypto -L$(TOP)/shared -lshared -shared -o $@ $(DIAG_OBJS)
+	$(LD) -L$(TOP)/nvram${BCMEX}${EX7} -lnvram -rpath=$(STAGEDIR)/usr/lib -lssl -lcrypto -L$(TOP)/shared -lshared -shared -o $@ $(DIAG_OBJS)
 endif
 endif
