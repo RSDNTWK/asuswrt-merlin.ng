@@ -6746,11 +6746,11 @@ curl/Makefile: curl/configure
 		--disable-threaded-resolver --disable-ntlm-wb \
 		--disable-doh --disable-netrc --disable-dnsshuffle \
 		--with-openssl=$(TOP)/openssl-1.1 --with-ca-fallback \
-		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
+		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt --gc-sections \
 		CFLAGS="$(if $(RTCONFIG_DEBUG),-g,-Os) -Wall -ffunction-sections -fdata-sections" \
 		CPPFLAGS="-I$(TOP)/openssl-1.1/include" \
 		comma="," \
-		LDFLAGS="-L$(TOP)/openssl-1.1 --gc-sections" \
+		LDFLAGS="-L$(TOP)/openssl-1.1" \
 		LIBS="-ldl -lpthread -lcrypto -lssl"
 
 curl: $(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),openssl,) $(if $(RTCONFIG_TR069),libssh2,) $(if $(RTCONFIG_MBEDTLS),mbedtls,) $(if $(RTCONFIG_WOLFSSL),wolfssl,) curl/Makefile
