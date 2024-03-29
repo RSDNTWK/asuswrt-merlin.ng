@@ -6748,7 +6748,7 @@ curl/Makefile: curl/configure
 		--with-ssl=$(TOP)/openssl-1.1 --with-ca-fallback --without-ssl \
 		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
 		CFLAGS="$(if $(RTCONFIG_DEBUG),-g,-Os) -Wall -ffunction-sections -fdata-sections" \
-		CPPFLAGS="-I$(TOP)/openssl-1.1/include" \
+		CPPFLAGS="-I$(TOP)openssl-1.1/include" \
 		comma="," \
 		LDFLAGS="-L$(TOP)/openssl-1.1" \
 		LIBS="-ldl -lpthread -lcrypto -lssl"
