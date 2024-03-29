@@ -6746,7 +6746,7 @@ curl/Makefile: curl/configure
 		--disable-threaded-resolver --disable-ntlm-wb \
 		--disable-doh --disable-netrc --disable-dnsshuffle \
 		$(if $(RTCONFIG_TR069),--with-libssh2=$(STAGEDIR)/usr,--without-zlib) \
-		$(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),--with-ssl=$(TOP)/openssl-1.1 --with-ca-fallback,--without-ssl) \
+		$(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),--with-ssl=$(TOP)/openssl --with-ca-fallback,--without-ssl) \
 		$(if $(RTCONFIG_MBEDTLS),--with-mbedtls=$(STAGEDIR)/usr,--without-mbedtls) \
 		$(if $(RTCONFIG_WOLFSSL),--with-wolfssl=$(STAGEDIR)/usr,--without-wolfssl) \
 		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
@@ -6755,9 +6755,9 @@ curl/Makefile: curl/configure
 		comma="," \
 		LDFLAGS="-Wl$(if $(RTCONFIG_TR069),$(comma)-rpath-link=$(STAGEDIR)/usr/lib,),--gc-sections \
 			   -Wl$(if $(RTCONFIG_TR069),$(comma)-rpath=$(STAGEDIR)/usr/lib,),--gc-sections \
-			   $(LDFLAGS) -L$(STAGEDIR)/usr/lib -L$(TOP)/openssl-1.1" \
+			   $(LDFLAGS) -L$(STAGEDIR)/usr/lib -Wl,-rpath=$(STAGEDIR)/usr/lib -Wl,-rpath-link=$(STAGEDIR)/usr/lib" \
 		LIBS="-ldl $(if $(RTCONFIG_OPENSSL11),-lpthread,) \
-			   $(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),-L$(TOP)/openssl-1.1 -lcrypto -lssl,) \
+			   $(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),-lcrypto -lssl,) \
 			   $(if $(RTCONFIG_MBEDTLS),-lmbedcrypto -lmbedx509 -lmbedtls,) \
 			   $(if $(RTCONFIG_WOLFSSL),-lwolfssl,)"
 
