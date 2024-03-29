@@ -686,7 +686,7 @@ OBJS += monitor.o
 endif
 
 CFLAGS += -I$(TOP)/curl/include
-LDFLAGS += -L$(TOP)/curl/lib/.libs -lcurl
+LDFLAGS += -L$(TOP)/curl/lib/.libs -lcurl -rpath-link=$(STAGEDIR)/usr/lib -lssl -lcrypto
 ifeq ($(or $(RTCONFIG_FRS_LIVE_UPDATE),$(RTCONFIG_FRS_FEEDBACK),$(RTCONFIG_URLFW),$(RTCONFIG_SOFTWIRE46)),y)
 ifeq ($(RTCONFIG_TR069),y)
 CFLAGS += -I$(TOP)/libssh2-1.10.0/include -I$(TOP)/zlib/include
