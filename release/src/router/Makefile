@@ -3106,6 +3106,18 @@ else
 export PRIORITY_CHACHA = -DOPENSSL_PREFER_CHACHA_OVER_GCM
 endif
 openssl-1.1/Makefile:
+	cd openssl-3.0 && \
+	./Configure $(HOSTCONFIG) --prefix=/usr --openssldir=/etc/ssl --cross-compile-prefix=' ' \
+	$(if $(filter y,$(RTCONFIG_SFP) $(RTCONFIG_4M_SFP) $(RTCONFIG_8M_SFP)),-Os,-O2) \
+	$(if $(RTCONFIG_DEBUG),-g) \
+	-ffunction-sections -fdata-sections -Wl,--gc-sections \
+	shared $(OPENSSL_CIPHERS) no-err no-async --api=1.1.0 \
+	no-aria no-sm2 no-sm3 no-sm4 no-threads \
+	$(if $(filter y,$(RTCONFIG_WTFAST)),-DRTCONFIG_WTFAST,) \
+	$(PRIORITY_CHACHA)
+	@$(MAKE) -C openssl-3.0 depend
+	@$(MAKE) -C openssl-3.0 clean
+	@touch $@
 	cd openssl-1.1 && \
 	./Configure $(HOSTCONFIG) --prefix=/usr --openssldir=/etc/ssl --cross-compile-prefix=' ' \
 	$(if $(filter y,$(RTCONFIG_SFP) $(RTCONFIG_4M_SFP) $(RTCONFIG_8M_SFP)),-Os,-O2) \
@@ -3120,25 +3132,32 @@ openssl-1.1/Makefile:
 	@touch $@
 
 openssl-1.1: openssl-1.1/Makefile
+	$(MAKE) -C openssl-3.0 $(PARALLEL_BUILD) && $(MAKE) $@-stage
 	$(MAKE) -C openssl-1.1 $(PARALLEL_BUILD) && $(MAKE) $@-stage
 
 openssl-1.1-clean:
+	[ ! -f openssl-3.0/Makefile ] || $(MAKE) -C openssl-3.0 clean
+	@rm -f openssl-3.0/Makefile
 	[ ! -f openssl-1.1/Makefile ] || $(MAKE) -C openssl-1.1 clean
 	@rm -f openssl-1.1/Makefile
 
 openssl-1.1-install:
 ifneq ($(wildcard openssl-1.1/Makefile),)
+	install -D openssl-3.0/libcrypto.so.3 $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libcrypto.so.3
+	$(if $(RTCONFIG_DEBUG),,$(STRIP) $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libcrypto.so.3)
 	install -D openssl-1.1/libcrypto.so.1.1 $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libcrypto.so.1.1
 	$(if $(RTCONFIG_DEBUG),,$(STRIP) $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libcrypto.so.1.1)
 ifeq ($(or $(RTCONFIG_WEBDAV),$(RTCONFIG_FTP_SSL),$(RTCONFIG_OPENVPN),$(RTCONFIG_HTTPS)),y)
+	install -D openssl-3.0/libssl.so.3 $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libssl.so.3
+	$(if $(RTCONFIG_DEBUG),,$(STRIP) $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libssl.so.3)
 	install -D openssl-1.1/libssl.so.1.1 $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libssl.so.1.1
 	$(if $(RTCONFIG_DEBUG),,$(STRIP) $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libssl.so.1.1)
 endif
 ifeq ($(RTCONFIG_OPENSSL11),y)
-	cd $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib && rm -f libcrypto.so && ln -sf libcrypto.so.1.1 libcrypto.so
-	[ ! -f $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libssl.so.1.1 ] || \
-		cd $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib && rm -f libssl.so && ln -sf libssl.so.1.1 libssl.so
-	install -D openssl-1.1/apps/openssl $(INSTALLDIR)$(INSTALLSUBDIR)/usr/sbin/openssl
+	cd $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib && rm -f libcrypto.so && ln -sf libcrypto.so.3 libcrypto.so
+	[ ! -f $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib/libssl.so.3 ] || \
+		cd $(INSTALLDIR)$(INSTALLSUBDIR)/usr/lib && rm -f libssl.so && ln -sf libssl.so.3 libssl.so
+	install -D openssl-3.0/apps/openssl $(INSTALLDIR)$(INSTALLSUBDIR)/usr/sbin/openssl
 	$(if $(RTCONFIG_DEBUG),,$(STRIP) $(INSTALLDIR)$(INSTALLSUBDIR)/usr/sbin/openssl)
 	chmod 0500 $(INSTALLDIR)$(INSTALLSUBDIR)/usr/sbin/openssl
 endif
@@ -3147,6 +3166,7 @@ endif
 openssl-1.1-stage:
 ifeq ($(RTCONFIG_OPENSSL11),y)
 	$(MAKE) -C openssl-1.1 install_sw DESTDIR=$(STAGEDIR)
+	$(MAKE) -C openssl-3.0 install_sw DESTDIR=$(STAGEDIR)
 else
 	@true
 endif
@@ -5167,11 +5187,11 @@ endif
 ifeq ($(RTCONFIG_OPENSSL11),y)
 	install -d $(INSTALLDIR)/wtfast/usr/lib
 ifeq ($(HND_ROUTER),y)
-	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libcrypto.so.1.1 libcrypto.so.1.0.0
+	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libcrypto.so.3 libcrypto.so.1.0.0
 else
 	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf ../../lib/libpthread.so.0 libcrypto.so.1.0.0
 endif
-	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libssl.so.1.1 libssl.so.1.0.0
+	cd $(INSTALLDIR)/wtfast/usr/lib && ln -sf libssl.so.3 libssl.so.1.0.0
 endif
 
 # Media libraries
