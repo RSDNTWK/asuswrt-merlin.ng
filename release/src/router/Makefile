@@ -6745,7 +6745,7 @@ curl/Makefile: curl/configure
 		--disable-manual --disable-libcurl-option $(if $(RTCONFIG_IPV6),--enable-ipv6,--disable-ipv6) \
 		--disable-threaded-resolver --disable-ntlm-wb \
 		--disable-doh --disable-netrc --disable-dnsshuffle \
-		--with-ssl=$(TOP)/openssl-1.1 --with-ca-fallback --without-ssl \
+		--with-openssl=$(TOP)/openssl-1.1 --with-ca-fallback --without-ssl \
 		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
 		CFLAGS="$(if $(RTCONFIG_DEBUG),-g,-Os) -Wall -ffunction-sections -fdata-sections" \
 		CPPFLAGS="-I$(TOP)/openssl-1.1/include" \
