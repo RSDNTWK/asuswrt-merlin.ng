@@ -912,7 +912,7 @@ endif
 CFLAGS += -I$(TOP)/acsd$(BCMEX)$(EX7)
 CFLAGS  += -I$(TOP)/sqlite
 LDFLAGS2 += -L$(TOP)/sqlite/.libs -lsqlite3
-LDFLAGS2 += -L. -lconn_diag
+LDFLAGS2 += -L. -lconn_diag -rpath-link=$(STAGEDIR)/usr/lib -lssl -lcrypto
 
 OBJS += conn_diag.o
 ifeq ($(CONFIG_BCMWL5),y)
