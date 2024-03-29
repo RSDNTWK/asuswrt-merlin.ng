@@ -70,7 +70,7 @@ LIBS += -lm
 endif
 
 
-OPENSSL_LDFLAGS = -L$(OPENSSL_DIR) -rpath-link=$(STAGEDIR)/usr/lib
+OPENSSL_LDFLAGS = -L$(OPENSSL_DIR) -rpath=$(STAGEDIR)/usr/lib
 
 
 #Aggregate LDFLAGS
