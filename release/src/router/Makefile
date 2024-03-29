@@ -6745,12 +6745,12 @@ curl/Makefile: curl/configure
 		--disable-manual --disable-libcurl-option $(if $(RTCONFIG_IPV6),--enable-ipv6,--disable-ipv6) \
 		--disable-threaded-resolver --disable-ntlm-wb \
 		--disable-doh --disable-netrc --disable-dnsshuffle \
-		--with-ssl=$./openssl-1.1 --with-ca-fallback --without-ssl \
-		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt -I./openssl-1.1/include \
+		--with-ssl=$(SRCBASE)/router/openssl-1.1 --with-ca-fallback --without-ssl \
+		--with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
 		CFLAGS="$(if $(RTCONFIG_DEBUG),-g,-Os) -Wall -ffunction-sections -fdata-sections" \
 		CPPFLAGS="-I$(STAGEDIR)/usr/include" \
 		comma="," \
-		LDFLAGS="-L$./openssl-1.1" \
+		LDFLAGS="-L$(SRCBASE)/router/openssl-1.1" \
 		LIBS="-ldl -lpthread -lcrypto -lssl"
 
 curl: $(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),openssl,) $(if $(RTCONFIG_TR069),libssh2,) $(if $(RTCONFIG_MBEDTLS),mbedtls,) $(if $(RTCONFIG_WOLFSSL),wolfssl,) curl/Makefile
