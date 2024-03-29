@@ -6753,7 +6753,7 @@ curl/Makefile: curl/configure
 		LDFLAGS="-Wl$(if $(RTCONFIG_TR069),$(comma)-rpath-link=$(STAGEDIR)/usr/lib,),--gc-sections \
 			   -Wl$(if $(RTCONFIG_TR069),$(comma)-rpath=$(STAGEDIR)/usr/lib,),--gc-sections \
 			   $(LDFLAGS) -L$(STAGEDIR)/usr/lib -L$(SRCBASE)/router/openssl-1.1" \
-		LIBS="-ldl -lpthread,) \
+		LIBS="-ldl -lpthread \
 			   -L$(SRCBASE)/router/openssl-1.1 -lcrypto -lssl"
 
 curl: $(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),openssl,) $(if $(RTCONFIG_TR069),libssh2,) $(if $(RTCONFIG_MBEDTLS),mbedtls,) $(if $(RTCONFIG_WOLFSSL),wolfssl,) curl/Makefile
