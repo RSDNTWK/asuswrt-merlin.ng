@@ -6752,7 +6752,8 @@ curl/Makefile: curl/configure
 		comma="," \
 		LDFLAGS="--gc-sections \
 			   $(LDFLAGS) -L$(SRCBASE)/router/openssl-1.1 -L$(STAGEDIR)/usr/lib" \
-		LIBS="-ldl -lpthread -lcrypto -lssl"
+		LIBS="-ldl -lpthread \
+			   -L$(SRCBASE)/router/openssl-1.1 -lcrypto -lssl"
 
 curl: $(if $(RTCONFIG_OPENSSL11)$(RTCONFIG_OPENSSL10),openssl,) $(if $(RTCONFIG_TR069),libssh2,) $(if $(RTCONFIG_MBEDTLS),mbedtls,) $(if $(RTCONFIG_WOLFSSL),wolfssl,) curl/Makefile
 	@$(SEP)
