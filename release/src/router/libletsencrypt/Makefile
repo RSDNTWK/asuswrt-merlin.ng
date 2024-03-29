@@ -5,14 +5,14 @@ CFLAGS += -I. -I$(TOP)/shared -I$(SRCBASE)/include
 ifeq ($(RTCONFIG_BCMARM),y)
 CFLAGS += -I$(SRCBASE)/shared/bcmwifi/include -DTYPEDEF_FLOAT_T
 endif
-CFLAGS += -I$(TOP)/openssl/include
+CFLAGS += -I$(TOP)/openssl-1.1/include
 LDFLAGS += $(EXTRALDFLAGS) -L$(TOP)/shared -lshared
 ifeq ($(RTCONFIG_BCM_502L07P2),y)
 LDFLAGS += -L$(TOP_PLATFORM)/ethctl_lib -lethctl
 endif
 LDFLAGS += -L$(TOP_PLATFORM)/nvram$(BCMEX)${EX7} ${EXTRA_NV_LDFLAGS} -lnvram
 LDFLAGS += -lcrypt
-LDFLAGS += -Wl,-rpath=$(STAGEDIR)/usr/lib -Wl,-rpath-link=$(STAGEDIR)/usr/lib -lcrypto -lssl $(if $(RTCONFIG_OPENSSL11),-lpthread,)
+LDFLAGS += -L$(TOP)/openssl-1.1 -lcrypto -lssl $(if $(RTCONFIG_OPENSSL11),-lpthread,)
 
 
 INSTALL = install
