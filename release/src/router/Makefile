@@ -3119,6 +3119,7 @@ openssl-1.1/Makefile:
 	$(PRIORITY_CHACHA)
 	@$(MAKE) -C openssl-3.0 depend
 	@$(MAKE) -C openssl-3.0 clean
+	sed '/-latomic/d' ./Makefile
 	@touch $@
 	cd openssl-1.1 && \
 	./Configure $(HOSTCONFIG) --prefix=/usr --openssldir=/etc/ssl --cross-compile-prefix=' ' \
