@@ -748,6 +748,7 @@ $config{ex_libs} = [ env('__CNF_LDLIBS') || () ];
 
 $config{openssl_api_defines}=[];
 $config{openssl_sys_defines}=[];
+$config{openssl_thread_defines}=[];
 $config{openssl_feature_defines}=[];
 $config{options}="";
 $config{build_type} = "release";
