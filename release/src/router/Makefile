@@ -3114,7 +3114,7 @@ openssl-1.1/Makefile:
 	$(if $(RTCONFIG_DEBUG),-g) \
 	-ffunction-sections -fdata-sections -Wl,--gc-sections \
 	shared $(OPENSSL_CIPHERS) no-err no-async --api=1.1.0 \
-	no-aria no-sm2 no-sm3 no-sm4 no-threads \
+	no-aria no-sm2 no-sm3 no-sm4 \
 	$(if $(filter y,$(RTCONFIG_WTFAST)),-DRTCONFIG_WTFAST,) \
 	$(PRIORITY_CHACHA)
 	@$(MAKE) -C openssl-3.0 depend
