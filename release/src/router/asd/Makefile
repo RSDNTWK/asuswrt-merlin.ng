@@ -5,7 +5,7 @@ LIB_OBJ = feature_def.o signature.o utility.o protect_name.o libasd.o misc.o mon
 
 CFLAGS += $(if $(RTCONFIG_DEBUG),-g) -idirafter$(LINUXDIR)/include -I$(TOP)/shared  -I$(SRCBASE)/include
 CFLAGS += -I$(TOP)/curl/include
-CFLAGS += -I$(TOP)/openssl-1.1/include
+CFLAGS += -I$(TOP)/openssl/include
 CFLAGS += -I$(TOP)/libasc
 ifeq ($(RTCONFIG_BCMARM),y)
 CFLAGS += -I$(SRCBASE)/shared/bcmwifi/include
@@ -38,7 +38,7 @@ ifeq ($(RTCONFIG_BCM_502L07P2),y)
 LDFLAGS += -L$(TOP_PLATFORM)/ethctl_lib -lethctl
 endif
 LDFLAGS += -L$(TOP)/curl/lib/.libs -lcurl -L$(TOP)/
-LDFLAGS += -L$(TOP)/openssl-1.1 -lcrypto -lssl
+LDFLAGS += -L$(TOP)/openssl -lcrypto -lssl
 LDFLAGS += -L$(TOP)/libasc -lasc
 LDFLAGS += -L$(TOP)/json-c/.libs -ljson-c
 ifeq ($(RTCONFIG_TR069),y)
