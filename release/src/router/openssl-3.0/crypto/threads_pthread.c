@@ -13,6 +13,10 @@
 #include <openssl/crypto.h>
 #include "internal/cryptlib.h"
 
+#if defined(__sun)
+# include <atomic.h>
+#endif
+
 #if defined(__apple_build_version__) && __apple_build_version__ < 6000000
 /*
  * OS/X 10.7 and 10.8 had a weird version of clang which has __ATOMIC_ACQUIRE and
