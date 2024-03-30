@@ -968,7 +968,6 @@ obj-$(RTCONFIG_AHS) += curl
 obj-$(RTCONFIG_AHS) += json-c
 obj-$(RTCONFIG_AHS) += ahs
 
-obj-$(RTCONFIG_ASD) += asd
 
 obj-$(RTCONFIG_OPENVPN) += libovpn
 
@@ -8230,18 +8229,6 @@ sysstat-10.0.3-install:
 	$(MAKE) -C sysstat-10.0.3 install_base DESTDIR=$(INSTALLDIR)/sysstat-10.0.3 INSTALL_DOC=n
 	mv $(INSTALLDIR)/sysstat-10.0.3/etc $(INSTALLDIR)/sysstat-10.0.3/etc_sysstat
 	rm -rf $(INSTALLDIR)/sysstat-10.0.3/var
-
-asd: shared $(if $(BCM_502L07P2),ethctl_lib) nvram$(BCMEX)$(EX7) curl openssl libasc
-	$(MAKE) -C $@
-
-asd-install:
-	install -D asd/asd $(INSTALLDIR)/asd/usr/bin/asd
-	install -D asd/libasd.so $(INSTALLDIR)/asd/usr/lib/libasd.so
-	$(if $(RTCONFIG_DEBUG),,$(STRIP) $(INSTALLDIR)/asd/usr/bin/asd)
-	$(if $(RTCONFIG_DEBUG),,$(STRIP) $(INSTALLDIR)/asd/usr/lib/libasd.so)
-
-asd-clean:
-	$(MAKE) -C asd clean
 
 
 #
