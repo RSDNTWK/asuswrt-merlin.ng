@@ -1,7 +1,29 @@
 Asuswrt-Merlin Changelog
 ========================
 
-386.13 (xx-xx-xxxx)
+386.14 (20-July-2024)
+  - NOTE: Reminder that all models on the 386.xx series will
+          stop being supported by Asuswrt-Merlin at the end
+          of 2024.
+
+  - UPDATED: Merged with GPL 386_52805.
+  - UPDATED: wget to 1.24.5.
+  - FIXED: WPS wouldn't start on RT-AC68U (note: starting through
+           webui was fixed, however starting through button is
+           still broken for the RT-AC66U_B1, including with
+           stock firmware).
+  - REMOVED: Wifi Radar was removed (unsupported by Wifi 7 devices,
+             and security issues cited by Asus in their own recent
+             releases).
+
+
+386.13_2 (26-Apr-2024)
+  - NOTE: This release is only available for the RT-AC86U
+          and GT-AC2900.
+  - UPDATED: strongswan to 5.9.13 (fixes CVE-2023-41913)
+
+
+386.13 (7-Apr-2024)
   - NOTE: all the models supported by Asuswrt-Merlin on the
           386_xx series are now officialy on Asus' End of Life
           list, which means unless there are new major security
@@ -22,6 +44,18 @@ Asuswrt-Merlin Changelog
              page even if QoS isn't set to Adaptive QoS.
   - CHANGED: Prevent the use of Apple's iCloud Private Relay
              when enabling "Prevent client auto DoH".
+  - CHANGED: NAT Passthrough page - removed the "Enabled + NAT
+             Helper" option as the firewall no longer blocks
+             traffic when set to disabled.  This is back to the
+             former behaviour, where this setting only controls
+             whether or not to load the NAT helper.  You might
+             need to readjust that setting if you had previously
+             changed it.
+  - CHANGED: SIP, RTSP and H323 ALG (NAT helpers) are now
+             disabled by default, as these legacy features tend
+             to create issues with modern VoIP setups.
+             This change will only apply to people doing a
+             factory default reset of their router.
   - FIXED: CVE-2023-48795 in dropbear.
   - FIXED: Various issues with the QOS Classification page.
   - FIXED: UPNP leases without a description would not appear
@@ -31,6 +65,8 @@ Asuswrt-Merlin Changelog
            validation code for now.
   - FIXED: Concurrent cronjob changes through cru could cause
            collisions, leading to missing jobs (dave14305)
+  - FIXED: CVE-2023-5678 & CVE-2024-0727 in openssl (backport from
+           Ubuntu by RSDNTWK)
 
 
 386.12_6 (26-Feb-2024)
