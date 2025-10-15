@@ -18,7 +18,6 @@
 <script language="JavaScript" type="text/javascript" src="/validator.js"></script>
 <script language="JavaScript" type="text/javascript" src="/popup.js"></script>
 <script language="JavaScript" type="text/javascript" src="/help.js"></script>
-<script language="JavaScript" type="text/javascript" src="/tmmenu.js"></script>
 <script language="JavaScript" type="text/javascript" src="/disk_functions.js"></script>
 
 <style type="text/css">
@@ -86,6 +85,31 @@ function initial() {
 	hide_rstats_storage(document.form.rstats_location.value);
 	document.aidiskForm.protocol.value = PROTOCOL;
 	initial_dir();
+}
+
+
+function switchPage(page, current){
+	if (current == page) {
+		return false;
+	}
+
+	switch (page) {
+		case "1":
+			location.href = "/Main_TrafficMonitor_realtime.asp";
+			break;
+		case "2":
+			location.href = "/Main_TrafficMonitor_last24.asp";
+			break;
+		case "3":
+			location.href = "/Main_TrafficMonitor_daily.asp";
+			break;
+		case "4":
+			location.href = "/Main_TrafficMonitor_monthly.asp";
+			break;
+		case "5":
+			location.href = "/Main_TrafficMonitor_settings.asp";
+			break;
+	}
 }
 
 function initial_dir(){
@@ -547,9 +571,23 @@ function applyRule(){
                 <tbody>
                 <tr bgcolor="#4D595D">
                 <td valign="top">
-			<div>&nbsp;</div>
-			<div class="formfonttitle"><#Menu_TrafficManager#> - Settings</div>
-			<div style="margin:10px 0 10px 5px;" class="splitLine"></div>
+					<table width="100%">
+						<tr>
+							<td  class="formfonttitle" align="left">
+								<div id="content_title" style="margin-top:5px;"><#Menu_TrafficManager#> - Settings</div>
+							</td>
+							<td>
+								<div align="right">
+									<select id="page_select" onchange="switchPage(this.options[this.selectedIndex].value, '5')" class="input_option" style="margin-top:8px;">
+										<option value="1"><#menu4_2_1#></option>
+										<option value="2"><#menu4_2_2#></option>
+										<option value="3"><#menu4_2_3#></option>
+										<option value="4">Monthly</option>
+										<option value="5" selected>Settings</option>
+									</select>
+								</div>
+				</td></tr></table>
+				<div style="margin:10px 0 10px 5px;" class="splitLine"></div>
 				<table width="100%" border="1" align="center" cellpadding="4" cellspacing="0" bordercolor="#6b8fa3"  class="FormTable">
 					<thead>
 						<tr>

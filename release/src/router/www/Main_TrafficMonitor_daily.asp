@@ -18,6 +18,18 @@
 <script language="JavaScript" type="text/javascript" src="/general.js"></script>
 <script language="JavaScript" type="text/javascript" src="/popup.js"></script>
 <script language="JavaScript" type="text/javascript" src="/js/httpApi.js"></script>
+<script language="JavaScript" type="text/javascript" src="/js/trafmon.js"></script>
+
+<style>
+.chartCanvas {
+	cursor: crosshair;
+	background-color: #2f3e44;
+	border-radius: 10px;
+	width: 100% !important;
+	height: 370px;
+	display: block;
+}
+</style>
 
 <script type='text/javascript'>
 var nvram = httpApi.nvramGet(["rstats_enable"]);
@@ -28,9 +40,14 @@ var chartObj;
 
 var scale = 2;
 var months = [];
-const snames = ['KB', 'MB', 'GB'];
-const scaleFactors = [1, 1024, 1048576];
-const ui_locale = ui_lang.toLowerCase();
+
+const labelsColor = "#CCC";
+const gridColor = "#282828";
+const ticksColor = "#CCC";
+const rxBackgroundColor = "#4C8FC0";
+const rxBorderColor = "#000000";
+const txBackgroundColor = "#4CC08F";
+const txBorderColor = "#000000";
 
 function init(){
 	var scaleCookie;
@@ -51,30 +68,6 @@ function init(){
 	if(bwdpi_support){
 		document.getElementById('content_title').innerHTML = "<#traffic_monitor#>";
 	}
-}
-
-function switchPage(page){
-	if(page == "1")
-		location.href = "/Main_TrafficMonitor_realtime.asp";
-	else if(page == "2")
-		location.href = "/Main_TrafficMonitor_last24.asp";
-	else if(page == "4")
-		location.href = "/Main_TrafficMonitor_monthly.asp";
-	else
-		return false;
-}
-
-function generateMonthsLabels() {
-	for (let i = 0; i < 12; i++) {
-		months.push(
-			new Date(2000, i, 1).toLocaleString(ui_locale, { month: 'short' })
-		);
-	}
-	return months;
-}
-
-function rescale(n){
-	return (Number(n / scaleFactors[scale]).toLocaleString(ui_locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })) + " " + snames[scale];
 }
 
 function ymdText(yr, mo, da){
@@ -139,9 +132,9 @@ function display_data(){
 		rows++;
 
 		htmldata += '<tr><td>' + ymdText(ymd[0], ymd[1], ymd[2]) + '</td>' +
-		            '<td class="dl">' + rescale(entry[1]) + '</td>' +
-		            '<td class="ul">' + rescale(entry[2]) + '</td>' +
-		            '<td class="total">' + rescale(entry[1] + entry[2]) + '</td></tr>';
+		            '<td class="dl">' + rescale_value(entry[1], scale) + '</td>' +
+		            '<td class="ul">' + rescale_value(entry[2], scale) + '</td>' +
+		            '<td class="total">' + rescale_value(entry[1] + entry[2], scale) + '</td></tr>';
 
 		if (entry[0] >= lastt) {
 			lastd += entry[1];
@@ -157,9 +150,9 @@ function display_data(){
 		htmldata +='<tr><td class="hint-color" colspan="4"><#IPConnection_VSList_Norule#></td></tr>';
 
 	document.getElementById('bwm-daily-grid').innerHTML = htmldata + '</table>';
-	document.getElementById('last-dn').innerHTML = rescale(lastd);
-	document.getElementById('last-up').innerHTML = rescale(lastu);
-	document.getElementById('last-total').innerHTML = rescale(lastu + lastd);
+	document.getElementById('last-dn').innerHTML = rescale_value(lastd, scale);
+	document.getElementById('last-up').innerHTML = rescale_value(lastu, scale);
+	document.getElementById('last-total').innerHTML = rescale_value(lastu + lastd, scale);
 
 	drawChart();
 }
@@ -181,26 +174,26 @@ function drawChart(){
 			datasets: [
 				{
 					data: barDataDl,
-					label: "<#tm_reception#> (" + snames[scale] + ")",
+					label: "<#tm_reception#> (" + scaleNames[scale] + ")",
 					borderWidth: border,
-					backgroundColor: "#4C8FC0",
-					borderColor: "#000000"
+					backgroundColor: rxBackgroundColor,
+					borderColor: rxBorderColor
 				},
 				{
 					data: barDataUl,
-					label: "<#tm_transmission#> (" + snames[scale] +")",
+					label: "<#tm_transmission#> (" + scaleNames[scale] +")",
 					borderWidth: border,
-					backgroundColor: "#4CC08F",
-					borderColor: "#000000"
+					backgroundColor: txBackgroundColor,
+					borderColor: txBorderColor
 				}
 			]
 		},
 		options: {
-			segmentShowStroke : false,
-			segmentStrokeColor : "#000",
-			animationEasing : "easeOutQuart",
-			animationSteps : 100,
-			animateScale : true,
+			segmentShowStroke: false,
+			animationEasing: "easeOutQuart",
+			animationSteps: 100,
+			animateScale: true,
+			responsive: true,
 			interaction: {
 				mode: 'index',
 				intersect: false
@@ -211,26 +204,26 @@ function drawChart(){
 					intersect: false,
 					mode: 'index',
 					callbacks: {
-						label: function (context) { return context.parsed.y.toLocaleString(ui_locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + snames[scale]; },
+						label: function (context) { return context.parsed.y.toLocaleString(ui_locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + scaleNames[scale]; },
 					}
 				},
 				legend: {
 					display: true,
 					position: "top",
-					labels: {color: "#CCC"}
+					labels: {color: labelsColor}
 				},
 			},
 			scales: {
 				x: {
 					grid: { display: false },
-					ticks: {color: "#CCC" },
+					ticks: {color: ticksColor },
 				},
 				y: {
-					grid: { color: "#282828" },
+					grid: { color: gridColor },
 					ticks: {
-						color: "#CCC",
+						color: ticksColor,
 						callback: function(value, index, values) {
-							return value.toLocaleString(ui_locale);
+							return value.toLocaleString(ui_locale) + " " + scaleNames[scale];
 						}
 					}
 				}
@@ -289,11 +282,12 @@ function drawChart(){
 										</td>
 										<td>
 											<div align="right">
-												<select id="page_select" class="input_option" style="width:120px" onchange="switchPage(this.options[this.selectedIndex].value)">
+												<select id="page_select" onchange="tm_switchPage(this.options[this.selectedIndex].value, '3')" class="input_option">
 													<option value="1"><#menu4_2_1#></option>
 													<option value="2"><#menu4_2_2#></option>
 													<option value="3" selected><#menu4_2_3#></option>
 													<option value="4">Monthly</option>
+													<option value="5">Settings</option>
 												</select>
 											</div>
 										</td>
@@ -327,7 +321,7 @@ function drawChart(){
 					</tr>
 					<tr>
 						<td>
-							<div style="background-color:#2f3e44;border-radius:10px;width:730px;"><canvas id="chart" style="cursor:crosshair;" height="140"></div>
+							<canvas id="chart" class="chartCanvas"></canvas>
 						</td>
 					</tr>
 					<tr>

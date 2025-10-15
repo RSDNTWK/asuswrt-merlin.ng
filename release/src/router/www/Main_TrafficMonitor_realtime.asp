@@ -18,14 +18,35 @@
 <script language="JavaScript" type="text/javascript" src="state.js"></script>
 <script language="JavaScript" type="text/javascript" src="general.js"></script>
 <script language="JavaScript" type="text/javascript" src="popup.js"></script>
+<script language="JavaScript" type="text/javascript" src="/js/trafmon.js"></script>
+
+<style>
+.chartCanvas {
+	cursor: crosshair;
+	background-color: #2f3e44;
+	border-radius: 10px;
+	width: 100% !important;
+}
+</style>
 
 <script type='text/javascript'>
-var nvram = httpApi.nvramGet(["wans_lanport"]);
 
 var speed_data = {};
 var last_speed_data = {};
 var chartObj = {};
 var refresh_toggle = 1;
+
+const updateFrequency = 1000;
+const maxSamples = 60;
+const showBitrate = 1;
+
+const labelsColor = "#CCC";
+const gridColor = "#282828";
+const ticksColor = "#CCC";
+const rxBorderColor = "rgba(76, 143, 192, 1)";
+const rxBackgroundColor = "rgba(76, 143, 192, 0.3)";
+const txBorderColor = "rgba(76, 192, 143, 1)";
+const txBackgroundColor = "rgba(76, 192, 143, 0.3)";
 
 // disable auto log out
 AUTOLOGOUT_MAX_MINUTE = 0;
@@ -36,18 +57,6 @@ function init(){
 		document.getElementById('content_title').innerHTML = "<#traffic_monitor#>";
 	}
 	update_traffic();
-}
-
-
-function switchPage(page){
-	if(page == "1")
-		return false;
-	else if(page == "2")
-		location.href = "/Main_TrafficMonitor_last24.asp";
-	else if(page == "4")
-		location.href = "/Main_TrafficMonitor_monthly.asp";
-	else if(page== "3")
-		location.href = "/Main_TrafficMonitor_daily.asp";
 }
 
 
@@ -71,7 +80,7 @@ function init_data_object(){
 			speed_data[ifname].tx = [];
 			speed_data[ifname].max_rx = 0;
 			speed_data[ifname].max_tx = 0;
-			speed_data[ifname].friendly = get_friendly_name(ifname);
+			speed_data[ifname].friendly = get_friendly_ifname(ifname);
 
 			last_speed_data[ifname] = {};
 			last_speed_data[ifname].rx = 0;
@@ -82,7 +91,7 @@ function init_data_object(){
 		var htmldata = '<table width="100%" border="1" align="center" cellpadding="4" cellspacing="0" bordercolor="#6b8fa3"  class="FormTable">';
 		htmldata += '<thead><tr><td>' + speed_data[ifname].friendly + '</td></tr></thead>';
 		htmldata += '<tr>';
-		htmldata += '<td style="padding:14px;" width="100%"><canvas style="cursor:crosshair; background-color:#2f3e44;border-radius:10px;width: 100% !important; height:220px;" id="' + ifname + '_Chart"></canvas>';
+		htmldata += '<td style="padding:14px;" width="100%"><div style="height: 250px;"><canvas class="chartCanvas" id="' + ifname + '_Chart"></canvas></div>';
 		htmldata += '<div style="padding-top: 14px; display: flex; justify-content: space-between;">';
 		htmldata += '<div class="hint-color">Current In: <span style="color: white;" id="' + ifname + '_RX_current"></span></div><div class="hint-color">Max In: <span style="color: white;" id="'+ ifname + '_RX_max"></span></div>';
 		htmldata += '<div class="hint-color">Current Out: <span style="color: white;" id="' + ifname + '_TX_current"></span></div><div class="hint-color">Max Out: <span style="color: white;"id="'+ ifname + '_TX_max"></span></div>';
@@ -97,148 +106,6 @@ function init_data_object(){
 /* Chart objects */
 		chartObj[ifname] = {};
 	}
-}
-
-
-function get_friendly_name(ifname){
-	var title;
-
-	switch(ifname){
-		case "INTERNET":
-		case "INTERNET0":
-			if(dualWAN_support){
-				if(wans_dualwan_array[0] == "usb"){
-					if(gobi_support)
-						title = "<#Mobile_title#>";
-					else
-						title = "USB Modem";
-				}
-				else if(wans_dualwan_array[0] == "wan"){
-					title = "WAN";
-					if (based_modelid == "TUF-AX4200" || based_modelid == "TUF-AX6000")
-						title = "2.5G WAN";
-					if (based_modelid == "GT-AXY16000" || based_modelid == "RT-AX89U" || based_modelid == "TUF-AX4200" || based_modelid == "TUF-AX6000") {
-						if (wan_bonding_support && nvram.bond_wan == '1')
-							title = "Bond";
-					}
-				}
-				else if(wans_dualwan_array[0] == "wan2"){
-					if (based_modelid == "GT-AXY16000" || based_modelid == "RT-AX89U")
-						title = "10G base-T";
-					else
-						title = "WAN2";
-				}
-				else if(wans_dualwan_array[0] == "lan") {
-					title = "LAN Port " + nvram.wans_lanport;
-					if (based_modelid == "TUF-AX4200" || based_modelid == "TUF-AX6000") {
-						if (nvram.wans_lanport == '5')
-							title = "2.5G LAN";
-					}
-				}
-				else if(wans_dualwan_array[0] == "dsl")
-					title = "DSL WAN";
-				else if(wans_dualwan_array[0] == "sfp+")
-					title = "10G SFP+";
-				else
-					title = "<#dualwan_primary#>";
-			}
-			else
-				title = "<#Internet#>";
-
-			return title;
-
-		case "INTERNET1":
-			if(wans_dualwan_array[1] == "usb"){
-				if(gobi_support)
-					title = "<#Mobile_title#>";
-				else
-					title = "USB Modem";
-			}
-			else if(wans_dualwan_array[1] == "wan"){
-				title = "WAN";
-				if (based_modelid == "TUF-AX4200" || based_modelid == "TUF-AX6000")
-					title = "2.5G WAN";
-				if (based_modelid == "GT-AXY16000" || based_modelid == "RT-AX89U" || based_modelid == "TUF-AX4200" || based_modelid == "TUF-AX6000") {
-					if (wan_bonding_support && nvram.bond_wan == '1')
-						title = "Bond";
-				}
-			}
-			else if(wans_dualwan_array[1] == "wan2"){
-				if (based_modelid == "GT-AXY16000" || based_modelid == "RT-AX89U")
-					title = "10G base-T";
-				else
-					title = "WAN2";
-			}
-			else if(wans_dualwan_array[1] == "lan") {
-				title = "LAN Port " + nvram.wans_lanport;
-				if (based_modelid == "TUF-AX4200" || based_modelid == "TUF-AX6000") {
-					if (nvram.wans_lanport == '5')
-						title = "2.5G LAN";
-				}
-			}
-			else if(wans_dualwan_array[1] == "sfp+")
-				title = "10G SFP+";
-			else
-				title = "<#dualwan_secondary#>";
-
-			return title;
-
-		case "BRIDGE":
-			return "LAN";
-		case "WIRED":
-			return "<#tm_wired#>";
-
-		case "WIRELESS0":
-		case "WIRELESS1":
-		case "WIRELESS2":
-		case "WIRELESS3":
-			var num = ifname.substr(8);
-			return "Wireless " + wl_nband_title[num];
-	}
-
-/* Handle multi-instanced interfaces */
-	if (ifname.search(/WAGGR/) > -1){
-		var bs_port_id = ifname.substr(5);
-		if (bs_port_id == 0)
-			return "bond-slave (WAN)";
-		else if (bs_port_id >= 1 && bs_port_id <= 8)
-			return "bond-slave (LAN Port "+bs_port_id+")";
-		else if (bs_port_id == 30)
-			return "bond-slave (10G base-T)";
-		else if (bs_port_id == 31)
-			return "bond-slave (10G SFP+)";
-		else
-			return "NotUsed";
-	}
-	else if (ifname.search(/LACPW/) > -1){
-		var num = ifname.substr(5);
-		return "bond-slave (WAN"+num+")";
-	}
-	else if (ifname.search("LACP") > -1){
-		var num = ifname.substr(4);
-		return "bond-slave (LAN Port "+num+")";
-	}
-
-	/* No friendly name, return as-is */
-	return ifname;
-}
-
-
-function rescale_auto(value){
-	var unit = " KB/s";
-	value = value / 1024;
-
-	if (value > 1024) {
-		value = value / 1024;
-		unit = " MB/s";
-	}
-
-	if (value > 1024) {
-		value = value / 1024;
-		unit = " GB/s";
-	}
-
-	return parseInt(value) + unit;
 }
 
 
@@ -267,7 +134,7 @@ function update_traffic() {
 						diff_rx = 1;
 					}
 					else{
-						diff_rx = (current_rx - last_speed_data[ifname].rx)/2;
+						diff_rx = (current_rx - last_speed_data[ifname].rx) / (updateFrequency/1000);
 					}
 				}
 
@@ -276,7 +143,7 @@ function update_traffic() {
 						diff_tx = 1;
 					}
 					else{
-						diff_tx = (current_tx - last_speed_data[ifname].tx)/2;
+						diff_tx = (current_tx - last_speed_data[ifname].tx) / (updateFrequency/1000);
 					}
 				}
 
@@ -293,21 +160,21 @@ function update_traffic() {
 					speed_data[ifname].max_tx = diff_tx;
 				}
 
-				if(speed_data[ifname].rx.length > 30){
+				if(speed_data[ifname].rx.length > maxSamples){
 					speed_data[ifname].rx.shift();
 				}
-				if(speed_data[ifname].tx.length > 30){
+				if(speed_data[ifname].tx.length > maxSamples){
 					speed_data[ifname].tx.shift();
 				}
 				if(refresh_toggle == 1) {
 					drawGraph(ifname);
-					document.getElementById(ifname + "_RX_current").innerHTML = rescale_auto(diff_rx);
-					document.getElementById(ifname + "_TX_current").innerHTML = rescale_auto(diff_tx);
-					document.getElementById(ifname + "_RX_max").innerHTML = rescale_auto(speed_data[ifname].max_rx);
-					document.getElementById(ifname + "_TX_max").innerHTML = rescale_auto(speed_data[ifname].max_tx);
+					document.getElementById(ifname + "_RX_current").innerHTML = rescale_data_rate(diff_rx, (showBitrate ? 2 : 1));
+					document.getElementById(ifname + "_TX_current").innerHTML = rescale_data_rate(diff_tx, (showBitrate ? 2 : 1));
+					document.getElementById(ifname + "_RX_max").innerHTML = rescale_data_rate(speed_data[ifname].max_rx, (showBitrate ? 2 : 1));
+					document.getElementById(ifname + "_TX_max").innerHTML = rescale_data_rate(speed_data[ifname].max_tx, (showBitrate ? 2 : 1));
 				}
 			}
-			setTimeout("update_traffic();", 2000);
+			setTimeout("update_traffic();", updateFrequency);
 		}
 	});
 }
@@ -327,35 +194,33 @@ function drawGraph(ifname){
 	chartObj[ifname].obj = new Chart(ctx, {
 		type: "line",
 		data: {
-			labels: Array.from({length: 30}, (v, i) => i),
+			labels: Array.from({length: maxSamples}, (v, i) => i),
 			datasets: [
 				{
 					label: speed_data[ifname].friendly + " In",
 					data: displayed_data_rx,
-					backgroundColor: "rgba(76, 143, 192, 0.3)",
-					borderColor: "rgba(76, 143, 192, 1)",
+					backgroundColor: rxBackgroundColor,
+					borderColor: rxBorderColor,
 					borderWidth: "2",
-					pointStyle: "line",
-					lineTension: "0.1",
+					pointRadius: "0",
 					fill: { target: "origin"}
 				},
 				{
 					label: speed_data[ifname].friendly + " Out",
 					data: displayed_data_tx,
-					backgroundColor: "rgba(76, 192, 143, 0.3)",
-					borderColor: "rgba(76, 192, 143, 1)",
+					backgroundColor: txBackgroundColor,
+					borderColor: txBorderColor,
 					borderWidth: "2",
-					pointStyle: "line",
-					lineTension: "0.1",
+					pointRadius: "0",
 					fill: { target: "origin"}
 				}
 			]
 		},
 		options: {
 			responsive: true,
+			maintainAspectRatio: false,
 			animation: false,
-			segmentShowStroke : false,
-			segmentStrokeColor : "#000",
+			segmentShowStroke: false,
 			interaction: {
 				mode: 'index',
 				intersect: false
@@ -372,30 +237,35 @@ function drawGraph(ifname){
 						label: function (context) {
 							var label = context.dataset.label || '';
 							var value = context.parsed.y;
-							return label + " - " + rescale_auto(value);
+							return label + " - " + rescale_data_rate(value, (showBitrate ? 2 : 1));
 						}
 					}
 				},
 				legend: {
 					display: true,
 					position: "top",
-					labels: {color: "#CCC"}
+					labels: {color: labelsColor}
 				},
 			},
 			scales: {
 				x: {
-					display: false,
+					display: true,
+					type: 'linear',
+					min: 0,
+					max: maxSamples,
+					grid: { color: gridColor },
 					ticks: {
-						color: "#CCC",
+						display: false,
+						stepSize: 10 / (updateFrequency/1000),
 					}
 				},
 				y: {
 					grace: "5%",
 					min: 0,
-					grid: { color: "#282828" },
+					grid: { color: gridColor },
 					ticks: {
-						color: "#CCC",
-						callback: function(value, index, ticks) {return rescale_auto(value);}
+						color: ticksColor,
+						callback: function(value, index, ticks) {return rescale_data_rate(value, (showBitrate ? 2 : 1));}
 					}
 				},
 			}
@@ -455,11 +325,12 @@ function drawGraph(ifname){
 											</td>
 											<td>
 												<div align="right">
-													<select id="page_select" onchange="switchPage(this.options[this.selectedIndex].value)" class="input_option">
+													<select id="page_select" onchange="tm_switchPage(this.options[this.selectedIndex].value, '1')" class="input_option">
 														<option value="1" selected><#menu4_2_1#></option>
 														<option value="2"><#menu4_2_2#></option>
 														<option value="3"><#menu4_2_3#></option>
 														<option value="4">Monthly</option>
+														<option value="5">Settings</option>
 													</select>
 												</div>
 											</td></tr></table>
