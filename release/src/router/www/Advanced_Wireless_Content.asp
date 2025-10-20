@@ -191,7 +191,7 @@
                 if (systemManipulable.brcmAfcSupport) {
                     const applyRule = function () {
                         httpApi.set_afc_enable("1");
-                        let restartTime = 10;
+                        let restartTime = 150;
                         showLoading(restartTime);
                         setTimeout(function () {
                             location.reload();
@@ -3055,9 +3055,6 @@
                             let channelBandwidth = document.getElementById(`${key}_channel_bandwidth`).value;
                             let controlChannel = document.getElementById(`${key}_control_channel`).value;
                             let extensionChannel = document.getElementById(`${key}_extension_channel`).value;
-                            if (bw320MHzSupport) {
-                               let bw320ChannelRange = document.getElementById(`${key}_bw320_channel_range`).value;
-                            }
                             if (controlChannel === "0") {
                                 return "0";
                             }

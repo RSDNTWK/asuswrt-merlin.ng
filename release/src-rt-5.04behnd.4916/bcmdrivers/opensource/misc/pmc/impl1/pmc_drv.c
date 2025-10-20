@@ -458,7 +458,7 @@ EXIT:
 
 int GetPVT(int sel, int island, int *value)
 {
-#if defined(CONFIG_BCM96765)
+#if defined(CONFIG_BCM96765) && !defined(CONFIG_BCM96764L)
 	if (sel == kTEMPERATURE) {
 		volatile MaestroMisc *maestro = (volatile MaestroMisc *)g_pmc->maestro_base;
 		*value = maestro->coreState.usrMbx[4];
@@ -470,7 +470,7 @@ int GetPVT(int sel, int island, int *value)
 
 int GetPVTKH2(int sel, int island, int *value)
 {
-#if defined(CONFIG_BCM96765)
+#if defined(CONFIG_BCM96765) && !defined(CONFIG_BCM96764L)
 	if (sel == kTEMPERATURE) {
 		volatile MaestroMisc *maestro = (volatile MaestroMisc *)g_pmc->maestro_base;
 		*value = maestro->coreState.usrMbx[4];

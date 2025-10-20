@@ -252,7 +252,8 @@ case "$1" in
 		echo "/sbin/modprobeX" > /proc/sys/kernel/modprobe
 
 		# enlarge min_free_kbytes for the OOM issue happens during wifi usb-stress testing
-		sysctl -qw vm.min_free_kbytes=16384
+		# sysctl -qw vm.min_free_kbytes=16384
+		echo "16384" > /proc/sys/vm/min_free_kbytes
 
 		# Copy the static versions of /etc/passwd and /etc/group to the runtime location (/var).
 		# (This is needed by ubusd early during bootup).

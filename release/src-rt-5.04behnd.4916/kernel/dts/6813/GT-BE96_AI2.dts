@@ -484,3 +484,12 @@
 &hsspi {
     status = "disabled";
 };
+
+&pincontroller {
+	pincontroller-functions {
+		emmc_ctrl_pins: emmc_ctrl_pinmux {
+			pins = <40 41>;
+			drive-strength = <14 8>;
+		};
+	};
+};

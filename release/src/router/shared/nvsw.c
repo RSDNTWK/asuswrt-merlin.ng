@@ -101,7 +101,7 @@ static int go_need_nv_switch_byBTNSW(unsigned char target_idx, unsigned char cur
 static int go_need_nv_switch_byBTNSW(unsigned char target_idx, unsigned char cur_idx, unsigned char *chgto)
 {
 	char sw_btn;
-	sw_btn = button_pressed(BTN_SWITCH)? '0' : 'i';
+	sw_btn = button_pressed(BTN_SWITCH)? '0' : '1';
 	if (cur_idx == 99) {
 			*chgto = cur_idx;
 			return 1;
