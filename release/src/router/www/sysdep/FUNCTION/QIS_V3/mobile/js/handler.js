@@ -4686,7 +4686,7 @@ goTo.Finish = function(){
 
 	sendMessageToSiteManager();
 
-	if(isSupport("GUNDAM_UI") || isSupport("TS_UI")) $("#gdContainer").show()
+	if(isSupport("GUNDAM_UI") || isSupport("TS_UI") || isSupport("GS7_MIKU")) $("#gdContainer").show()
 
 	if(!isSwMode("MB")){
 		$("#wirelessFinishFiled").append($("#wlInputField"));
@@ -4763,6 +4763,16 @@ goTo.Finish = function(){
 								.addClass("TX-modelText")
 								.appendTo($(".TX-title"));
 						}
+					}
+
+					if(isSupport("GS7_MIKU")){
+						$("#gundam_page").empty();
+						$("<div>")
+							.addClass("GD-content Miku-bg")
+							.attr("id", "GD-content")
+							.appendTo($("#gundam_page"));
+
+						$("#GD-content").append($("<div>").attr({"class": "GD-wait"}).append($("<div>").attr({"id": "GD-status"}).html("<#Excute_processing#>")));
 					}
 
 					$("#GD-status").html("<#QKSet_finishpre_rebootnow#>");

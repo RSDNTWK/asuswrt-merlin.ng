@@ -3,7 +3,12 @@ document.write('<script type="text/javascript" src="/require/require.min.js"></s
 document.write('<script type="text/javascript" src="/js/support_site.js"></script>');
 
 var CoBrand = '<% nvram_get("CoBrand"); %>';
-if(isSupport("TS_UI"))
+var productid = '<#Web_Title2#>';
+var based_modelid = '<% nvram_get("productid"); %>';
+var odmpid = '<% nvram_get("odmpid"); %>';
+var support_site_modelid = (odmpid == "")? based_modelid : odmpid;
+
+if(isSupport("TS_UI") || (based_modelid=="GS7" && CoBrand =="18"))
 	document.write('<link rel="stylesheet" type="text/css" href="/css/difference.css"></link>');
 
 /* String splice function */
@@ -274,10 +279,6 @@ var isSwMode = function(mode){
 var INDEXPAGE = "<% rel_index_page(); %>";
 var ABS_INDEXPAGE = "<% abs_index_page(); %>";
 var current_url = location.pathname.substring(location.pathname.lastIndexOf('/') + 1) || INDEXPAGE;
-var productid = '<#Web_Title2#>';
-var based_modelid = '<% nvram_get("productid"); %>';
-var odmpid = '<% nvram_get("odmpid"); %>';
-var support_site_modelid = (odmpid == "")? based_modelid : odmpid;
 var hw_ver = '<% nvram_get("hardware_version"); %>';
 var bl_version = '<% nvram_get("bl_version"); %>';
 var uptimeStr = "<% uptime(); %>";
@@ -869,7 +870,8 @@ if(based_modelid != "BRT-AC828"){
 //notification value
 if(navigator.userAgent.search("asusrouter") == -1){
 	var notice_pw_is_default = '<% check_pw(); %>';
-	if(notice_pw_is_default == 1 && window.location.pathname.toUpperCase().search("QIS_") < 0) //force to change http_passwd / http_username & except QIS settings
+	var force_chgpass = `<% nvram_get("force_chgpass"); %>`;
+	if((notice_pw_is_default == 1 || force_chgpass == 1) && window.location.pathname.toUpperCase().search("QIS_") < 0) //force to change http_passwd / http_username & except QIS settings
 		location.href = 'Main_Password.asp?nextPage=' + window.location.pathname.substring(1 ,window.location.pathname.length);
 	else if(`<% nvram_get("w_Setting"); %>` == '0' && !isSwMode("RP") && window.location.pathname.toUpperCase().search("QIS_") < 0)
 		location.href = '/QIS_wizard.htm?flag=wireless';

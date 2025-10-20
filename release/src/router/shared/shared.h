@@ -329,9 +329,11 @@ extern int guest_mark_calc(int guest_mark);
 #define GUEST_INIT_MARKNUM  1   /* 0x1 ~ 0xf */
 #define INITIAL_MARKNUM    16   /* 0x10 ~ 0x3f */
 #define SHIFT_BIT           5   /* 0x200 ~ 0x7e0 */
+#define LIMITER_MASK       (QOS_MASK<<SHIFT_BIT)
 #else
 #define GUEST_INIT_MARKNUM 10   /*10 ~ 30 for Guest Network. */
 #define INITIAL_MARKNUM    30   /*30 ~ X  for LAN . */
+#define LIMITER_MASK       QOS_MASK
 #endif
 
 #ifdef RTCONFIG_INTERNAL_GOBI
@@ -1585,7 +1587,7 @@ enum led_id {
 	IND_BT,
 	IND_PA,
 #endif
-#if defined(RTAX82U) || defined(DSL_AX82U) || defined(GSAX3000) || defined(GSAX5400) || defined(TUFAX5400) || defined(GTAX11000_PRO) || defined(GTAXE16000) || defined(GTBE98) || defined(GTBE98_PRO) || defined(GTAX6000) || defined(GT10) || defined(RTAX82U_V2) || defined(TUFAX5400_V2) || defined(GTBE96) || defined(GTBE19000) || defined(GTBE19000AI) || defined(GSBE18000) || defined(GSBE12000) || defined(GS7_PRO) || defined(GT7) || defined(GTBE96_AI) || defined(RTCONFIG_BCMLEDG)
+#if defined(RTAX82U) || defined(DSL_AX82U) || defined(GSAX3000) || defined(GSAX5400) || defined(TUFAX5400) || defined(GTAX11000_PRO) || defined(GTAXE16000) || defined(GTBE98) || defined(GTBE98_PRO) || defined(GTAX6000) || defined(GT10) || defined(RTAX82U_V2) || defined(TUFAX5400_V2) || defined(GTBE96) || defined(GTBE19000) || defined(GTBE19000AI) || defined(GSBE18000) || defined(GSBE12000) || defined(GS7_PRO) || defined(GT7) || defined(GTBE96_AI) || defined(RTCONFIG_AURALED)
 	LED_GROUP1_RED,
 	LED_GROUP1_GREEN,
 	LED_GROUP1_BLUE,
@@ -3524,6 +3526,7 @@ extern int mxlswitch_LanPort_linkUp(void);
 extern int mxlswitch_LanPort_linkDown(void);
 void mxl_fw_check();
 #endif
+extern int is_mxl_dual_serdes_war(void);
 #ifdef RTCONFIG_SW_SPDLED
 extern uint32_t hnd_get_phy_speed_rc(char *ifname);
 #endif
@@ -4399,6 +4402,20 @@ static inline void swap_wanlan(phy_port_mapping *port_mapping)
 
 extern void get_phy_port_mapping(phy_port_mapping *port_mapping); // for capability use
 extern void get_usb_modem_tatus(phy_info_list *list); // for usb modem status
+
+static inline int ext_switch_exist(void)
+{
+	phy_port_mapping port_mapping;
+	int i;
+
+	get_phy_port_mapping(&port_mapping);
+	for (i = 0; i < port_mapping.count; i++) {
+		if (port_mapping.port[i].ext_port_id != -1)
+			return 1;
+	}
+
+	return 0;
+}
 #endif //RTCONFIG_NEW_PHYMAP
 
 static inline int iptv_enabled(void)
@@ -4861,6 +4878,10 @@ extern int hnd_boardid_cmp(const char *boardid);
 #define IS_AFC_ENABLED()           (nvram_get_int("afcd_mode"))
 #define IS_AFC_PP()                get_ASUS_privacy_policy_state(ASUS_PP_AFC)
 #define IS_ICP_DEVICE_READY()      (f_exists("/dev/iio:device0") && d_exists("/sys/bus/iio/devices/iio:device0"))
+#define AFC_INFO_RAW               "/tmp/afc_info_raw"
+#define AFC_INFO_JSON              "/tmp/afc_info_raw.json"
+#define AFC_INFO_TIMEOUT           10
+#define AFC_INFO_HEADER_LINES      8
 extern char *afc_get_fccid();
 extern char *afc_get_serial();
 extern char *afc_get_mtls_url(int mode);
@@ -4868,14 +4889,19 @@ extern void gen_afc_cert();
 extern int IS_ICP_MODELS();
 extern int IS_AFC_ALLOW_SWMODE();
 extern int IS_AFC_SKU();
-extern void trigger_afc_positioning();
+extern int IS_AFC_EXCL_MODEL();
+extern void trigger_afc_positioning(char *silent_argv);
 extern void send_afc_slient_notify();
 extern void send_afc_notify();
 extern int calc_afc_cold_reboot();
 extern int wl_get_afc_info(char *ifname, char *chanspec);
 extern int wl_afc_status();
+extern int valid_afc_uncertainty_range(char *x, char *y, char *z);
 extern void afc_dumplog(const char *fmt, ...);
 extern double AFC_MeshPathLoss(int rssi, int tx, int channel, int band, int is_wired);
+extern void get_afc_info_json(char *bw);
+extern void dump_afc_info_raw();
+extern int afc_sp_failback_status();
 extern void clean_afc_geolaction();         // sysdeps
 extern int check_afc_nvram();               // sysdeps
 extern void clean_wifi_afc_geolaction();    // sysdpes
@@ -5403,7 +5429,7 @@ extern void firmware_downgrade_check(uint32_t sf);
 #define ANTLED_SCHEME_RSSI              2
 #endif
 
-#if defined(RTAX82U) || defined(DSL_AX82U) || defined(GSAX3000) || defined(GSAX5400) || defined(TUFAX5400) || defined(GTAX11000_PRO) || defined(GTAXE16000) || defined(GTBE98) || defined(GTBE98_PRO) || defined(GTAX6000) || defined(GT10) || defined(RTAX82U_V2) || defined(TUFAX5400_V2) || defined(TUFAX6000) || defined(GTBE96) || defined(GTBE19000) || defined(GTBE19000AI) || defined(GSBE18000) || defined(GSBE12000) || defined(GS7_PRO) || defined(GT7) || defined(GTBE96_AI) || defined(RTCONFIG_BCMLEDG)
+#if defined(RTAX82U) || defined(DSL_AX82U) || defined(GSAX3000) || defined(GSAX5400) || defined(TUFAX5400) || defined(GTAX11000_PRO) || defined(GTAXE16000) || defined(GTBE98) || defined(GTBE98_PRO) || defined(GTAX6000) || defined(GT10) || defined(RTAX82U_V2) || defined(TUFAX5400_V2) || defined(TUFAX6000) || defined(GTBE96) || defined(GTBE19000) || defined(GTBE19000AI) || defined(GSBE18000) || defined(GSBE12000) || defined(GS7_PRO) || defined(GT7) || defined(GTBE96_AI) || defined(RTCONFIG_AURALED)
 enum {
 	LEDG_QIS_RUN = 1,
 	LEDG_QIS_FINISH

@@ -1418,6 +1418,13 @@ function handleSysDep(){
 		$("#gdContainer").append($("<div>").attr({"class": "GD-wait"}).append($("<div>").attr({"id": "GD-status"}).html("<#Excute_processing#>")));
 	}
 
+	if(isSupport("GS7_MIKU")){
+		$("#summary_page").append($("<div>").attr({"id": "gdContainer", "class": "gundam-footer-field"}).hide())
+		$("#gdContainer").html('');
+		$(".headerBar").css("height", "72px");
+		$(".icon_logo").hide();
+	}
+
 	if(isSupport("mlo")){
 		$('#wifi6e_legacy_hint').remove();
 		$('#wifi6e_legacy_hint_summary').remove();
@@ -1443,9 +1450,27 @@ function handleSysDep(){
 				qisPostData["mlo_rp"] = "0";
 				qisPostData["mlo_mb"] = "0";
 				qisPostData["mld_enable"] = "0";
-				qisPostData["wlc_dpsta"] = "0";
+				qisPostData["wlc_dpsta"] = (()=>{
+					if (isSwMode("MB")) {
+						return 0;
+					}
+					else if (isSwMode("RP")) {
+						if (isSupport("concurrep") && isSupport("bcmwifi")) {
+							return isSupport("dpsr") ? 2 : 1;
+						}
+						else if(isSupport("amas") && isSupport("bcmwifi")) {
+							return 0;
+						}
+						else {
+							return 0;
+						}
+					}
+					else {
+						return 0;
+					}
+				})();
 			}
-		});	
+		});
 	}
 }
 
@@ -2044,9 +2069,10 @@ var isPage = function(page){
 
 var isSupport = function(_ptn){
 	var ui_support = JSON.parse(JSON.stringify(httpApi.hookGet("get_ui_support")));
-	var modelInfo = httpApi.nvramGet(["productid", "odmpid"]);
+	var modelInfo = httpApi.nvramGet(["productid", "odmpid", "CoBrand"]);
 	var based_modelid = modelInfo.productid;
 	var odmpid = modelInfo.odmpid;
+	var CoBrand = modelInfo.CoBrand;
 	var matchingResult = false;
 	var amas_bdlkey = httpApi.nvramGet(["amas_bdlkey"]).amas_bdlkey;
 
@@ -2081,6 +2107,9 @@ var isSupport = function(_ptn){
 			break;
 		case "GUNDAM_UI":
 			matchingResult = ((isGundam() || isKimetsu() || isEva()) && $(".desktop_left_field").is(":visible")) ? true : false;
+			break;
+		case "GS7_MIKU":
+			matchingResult = (based_modelid == "GS7" && CoBrand == "18") ? true : false;
 			break;
 		case "amas_bdl":
 			matchingResult = (isSupport("prelink") && ui_support["amas_bdl"] >= 1 && amas_bdlkey.length != 0) ? true : false;
@@ -2687,7 +2716,8 @@ function site2site_handle_wlSet(){
 }
 function adjust_popup_container_top(_obj, _offsetHeight){
 	$(_obj).css({top: ""});
-	var scrollTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+	const $scrollContainer = $('[data-role="page"]:visible');
+	let scrollTop = $scrollContainer.length ? $scrollContainer.scrollTop() : (window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0);
 	var parent_scrollTop = parent.window.pageYOffset || parent.document.documentElement.scrollTop || parent.document.body.scrollTop || 0;
 	if(scrollTop == 0 && parent_scrollTop != 0)
 		parent_scrollTop = parent_scrollTop - 200;

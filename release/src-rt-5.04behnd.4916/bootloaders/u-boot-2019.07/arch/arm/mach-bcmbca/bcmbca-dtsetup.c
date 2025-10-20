@@ -21,6 +21,7 @@
 #include "vfbio.h"
 #endif
 #include "bcm_otp.h"
+#include "bcm_bootstate.h"
 
 char * get_loader_media(void);
 
@@ -443,12 +444,23 @@ static int set_bootargs(void *blob)
 			if (strlen(rootfs) > 128) {
 				env_set("rootfs_opts","");
 			}
-		}
 
-		/* If rootfs is on eMMC, add 'gpt' kernel option which forces 
-		 * use of backup GPT header incase the primary header is corrupted */
-		if (strstr(rootfs, "mmc")) {
-			strncat(boot_args, " gpt", 1024-strlen(boot_args));
+			if (((bcmbca_get_old_boot_reason() & BCM_BOOT_PHASE_MASK)) ==
+			    BCM_BOOT_PHASE_LINUX_START) {
+				/* If we are running a fallback image which failed after the
+				 * LINUX_START phase add 'gpt' parameter to allow for parsing of
+				 * alternate GPT headers just incase last reboot was due to
+				 * primary GPT header corruption
+				 */
+				if (strstr(rootfs, "mmc")) {
+					/* Only pass 'gpt' if we detect bad GPT headers */
+					if (run_command("gpt verify mmc 0", 0)) {
+						strlcat(boot_args, " gpt",
+							1024 - strlen(boot_args));
+						printf("gpt: appending [gpt] to boot args\n");
+					}
+				}
+			}
 		}
 
 		/* any other argment to append? */
