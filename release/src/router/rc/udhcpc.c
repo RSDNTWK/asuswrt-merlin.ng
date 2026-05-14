@@ -359,7 +359,7 @@ _dprintf("%s(%d): ifunit=%d, if=%s.\n", __func__, getpid(), ifunit, wan_ifname);
 		strlcpy(autowan_detected_ifname, nvram_safe_get("autowan_detected_ifname"), sizeof(autowan_detected_ifname));
 
 		if(strcmp(autowan_detected_ifname, "") && strcmp(autowan_detected_ifname, wan_ifname)){
-			_dprintf("%s(%lu): auto_wanport: Had detected the WAN interface. skip bounding of %s.\n", __func__, getpid(), wan_ifname);
+			_dprintf("%s(%d): auto_wanport: Had detected the WAN interface. skip bounding of %s.\n", __func__, getpid(), wan_ifname);
 			return -1;
 		}
 
@@ -371,17 +371,17 @@ _dprintf("%s(%d): ifunit=%d, if=%s.\n", __func__, getpid(), ifunit, wan_ifname);
 			strlcpy(lan_ip, nvram_safe_get("lan_ipaddr"), sizeof(lan_ip));
 			strlcpy(lan_net, nvram_safe_get("lan_netmask"), sizeof(lan_net));
 
-			_dprintf("%s(%lu): auto_wanport: Get gateway %s & apply to %s first.\n", __func__, getpid(), gateway, lan_ifname);
+			_dprintf("%s(%d): auto_wanport: Get gateway %s & apply to %s first.\n", __func__, getpid(), gateway, lan_ifname);
 			ifconfig(lan_ifname, IFUP, "0.0.0.0", NULL);
 			ifconfig(lan_ifname, IFUP, getenv("ip"), getenv("subnet"));
 
-			_dprintf("%s(%lu): auto_wanport: send a ping to gateway for ARP.\n", __func__, getpid());
+			_dprintf("%s(%d): auto_wanport: send a ping to gateway for ARP.\n", __func__, getpid());
 			eval("ping", "-W1", "-c1", gateway);
 
 			memset(gateway_mac, 0, sizeof(gateway_mac));
 			get_mac_from_ip(gateway, gateway_mac, sizeof(gateway_mac));
 			if(!gateway_mac[0]){
-				_dprintf("%s(%lu): auto_wanport: Fail to get gateway_mac.\n", __func__, getpid());
+				_dprintf("%s(%d): auto_wanport: Fail to get gateway_mac.\n", __func__, getpid());
 				ifconfig(lan_ifname, IFUP, "0.0.0.0", NULL);
 				ifconfig(lan_ifname, IFUP, lan_ip, lan_net);
 
@@ -389,11 +389,11 @@ _dprintf("%s(%d): ifunit=%d, if=%s.\n", __func__, getpid(), ifunit, wan_ifname);
 
 				return -1;
 			}
-			_dprintf("%s(%lu): auto_wanport: Got gateway's MAC %s.\n", __func__, getpid(), gateway_mac);
+			_dprintf("%s(%d): auto_wanport: Got gateway's MAC %s.\n", __func__, getpid(), gateway_mac);
 
 			br_no = get_br_port_no_from_mac(gateway_mac);
 			if(br_no < 0){
-				_dprintf("%s(%lu): auto_wanport: Cannot get gateway's br_no.\n", __func__, getpid());
+				_dprintf("%s(%d): auto_wanport: Cannot get gateway's br_no.\n", __func__, getpid());
 				ifconfig(lan_ifname, IFUP, "0.0.0.0", NULL);
 				ifconfig(lan_ifname, IFUP, lan_ip, lan_net);
 
@@ -401,7 +401,7 @@ _dprintf("%s(%d): ifunit=%d, if=%s.\n", __func__, getpid(), ifunit, wan_ifname);
 
 				return -1;
 			}
-			_dprintf("%s(%lu): auto_wanport: Got gateway's br_no %d.\n", __func__, getpid(), br_no);
+			_dprintf("%s(%d): auto_wanport: Got gateway's br_no %d.\n", __func__, getpid(), br_no);
 
 			if(get_autoif_from_br_port_no(br_no, if_name, sizeof(if_name)) < 0){
 				ifconfig(lan_ifname, IFUP, "0.0.0.0", NULL);
@@ -411,21 +411,21 @@ _dprintf("%s(%d): ifunit=%d, if=%s.\n", __func__, getpid(), ifunit, wan_ifname);
 
 				if(get_if_from_br_port_no(br_no, if_name, sizeof(if_name)) == NULL)
 					return -1;
-				_dprintf("%s(%lu): auto_wanport: The port(%s) of the DHCP source isn't AUTO_WANPORT...\n", __func__, getpid(), if_name);
+				_dprintf("%s(%d): auto_wanport: The port(%s) of the DHCP source isn't AUTO_WANPORT...\n", __func__, getpid(), if_name);
 
 				return -1;
 			}
-			_dprintf("%s(%lu): auto_wanport: Got gateway's if %s.\n", __func__, getpid(), if_name);
+			_dprintf("%s(%d): auto_wanport: Got gateway's if %s.\n", __func__, getpid(), if_name);
 
 			wan_ifname = if_name;
 
-			_dprintf("%s(%lu): auto_wanport: restore the LAN IP of router.\n", __func__, getpid());
+			_dprintf("%s(%d): auto_wanport: restore the LAN IP of router.\n", __func__, getpid());
 			ifconfig(lan_ifname, IFUP, "0.0.0.0", NULL);
 			ifconfig(lan_ifname, IFUP, lan_ip, lan_net);
 
 			add_lan_routes(lan_ifname);
 
-			_dprintf("%s(%lu): auto_wanport: Choose the WAN interface %s because of DHCP.\n", __func__, getpid(), wan_ifname);
+			_dprintf("%s(%d): auto_wanport: Choose the WAN interface %s because of DHCP.\n", __func__, getpid(), wan_ifname);
 			set_auto_wanport(wan_ifname, 1);
 
 			return 0;
@@ -504,7 +504,7 @@ _dprintf("%s(%d): ifunit=%d, if=%s.\n", __func__, getpid(), ifunit, wan_ifname);
 	//if ((value = getenv("hostname")))
 	//	sethostname(value, strlen(value) + 1);
 	if ((value = getenv("lease"))) {
-		unsigned int lease = atoi(value);
+		unsigned int lease = safe_atoi(value);
 		nvram_set_int(strcat_r(prefix, "lease", tmp), lease);
 		expires(wan_ifname, lease);
 	}
@@ -774,7 +774,7 @@ renew(void)
 	//if ((value = getenv("hostname")))
 	//	sethostname(value, strlen(value) + 1);
 	if ((value = getenv("lease"))) {
-		unsigned int lease = atoi(value);
+		unsigned int lease = safe_atoi(value);
 		nvram_set_int(strcat_r(prefix, "lease", tmp), lease);
 		expires(wan_ifname, lease);
 	}
@@ -909,7 +909,7 @@ start_udhcpc(char *wan_ifname, int unit, pid_t *ppid)
 	/* DHCP query frequency */
 	value = nvram_get(strcat_r(prefix, "dhcp_qry", tmp)); // new nvram with wan index
 	if (value && strlen(value))
-		dhcp_qry = atoi(value);
+		dhcp_qry = safe_atoi(value);
 	else
 		dhcp_qry = nvram_get_int("dhcpc_mode");	// default = Aggressive mode
 	if (dhcp_qry == 0) {	// Normal mode
@@ -1281,7 +1281,7 @@ bound_lan(void)
 			lanchange = 1;
 		}
 		nvram_set("lan_lease", trim_r(value));
-		expires_lan(lan_ifname, atoi(value));
+		expires_lan(lan_ifname, safe_atoi(value));
 	}
 	if (nvram_get_int("lan_dnsenable_x") && (value = getenv("dns"))) {
 		if (!nvram_match("lan_dns", trim_r(value))) {
@@ -1358,6 +1358,7 @@ _dprintf("%s: IFUP.\n", __FUNCTION__);
 	lan_up(lan_ifname);
 
 	_dprintf("%s: done\n", __FUNCTION__);
+	logmessage("udhcpc", "bound_lan %s with IP/netmask %s/%s", lan_ifname, nvram_safe_get("lan_ipaddr"), nvram_safe_get("lan_netmask"));
 	return 0;
 }
 
@@ -1909,11 +1910,11 @@ bound6(char *wan_ifname, int bound)
 #endif
 
 	value = safe_getenv("RA_HOPLIMIT");
-	if (*value && (intval = atoi(value)))
+	if (*value && (intval = safe_atoi(value)))
 		ipv6_sysconf(wan_ifname, "hop_limit", intval);
 
 	value = safe_getenv("RA_MTU");
-	if (*value && (intval = atoi(value)) && intval < ifconfig_mtu(wan_ifname, 0)) {
+	if (*value && (intval = safe_atoi(value)) && intval < ifconfig_mtu(wan_ifname, 0)) {
 		ipv6_sysconf(wan_ifname, "mtu", intval);
 		ipv6_sysconf(lan_ifname, "mtu", intval);
 #ifdef RTCONFIG_MULTILAN_CFG
@@ -2201,11 +2202,11 @@ ra_updated6(char *wan_ifname)
 	envsave(tmp);
 
 	value = safe_getenv("RA_HOPLIMIT");
-	if (*value && (intval = atoi(value)))
+	if (*value && (intval = safe_atoi(value)))
 		ipv6_sysconf(wan_ifname, "hop_limit", intval);
 
 	value = safe_getenv("RA_MTU");
-	if (*value && (intval = atoi(value)) && intval < ifconfig_mtu(wan_ifname, 0)) {
+	if (*value && (intval = safe_atoi(value)) && intval < ifconfig_mtu(wan_ifname, 0)) {
 		ipv6_sysconf(wan_ifname, "mtu", intval);
 		ipv6_sysconf(lan_ifname, "mtu", intval);
 #ifdef RTCONFIG_MULTILAN_CFG
