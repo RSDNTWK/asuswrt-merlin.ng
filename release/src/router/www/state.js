@@ -703,8 +703,7 @@ var ark_qoe_support = isSupport("ark_qoe");
 var adaptiveqos_support = (ark_qoe_support > 0) ? 0 : isSupport("adaptive_qos");
 var ipsec_srv_support = isSupport("ipsec_srv");
 var ipsec_cli_support = isSupport("ipsec_cli");
-//var traffic_analyzer_support = isSupport("traffic_analyzer");
-var traffic_analyzer_support = bwdpi_support;
+var traffic_analyzer_support = isSupport("traffic_analyzer");
 var traffic_limiter_support = isSupport("traffic_limiter");
 var dns_dpi_support = isSupport("dns_dpi");
 var router_boost_support = isSupport("router_boost");
@@ -1898,9 +1897,6 @@ function showMenuTree(menuList, menuExclude){
 				//-----Fine tune tab icon start-----------				
 				if( dsl_support && (current_url.indexOf("Advanced_DSL_Content") == 0 || current_url.indexOf("Advanced_VDSL_Content") == 0 || current_url.indexOf("Advanced_WAN_Content") == 0 || current_url.indexOf("Advanced_Modem_Content") == 0)){
 					tab_code += (j == 1 || j == 3) ? 'tabClicked' : 'tab';	//show 1st tab css as class 'tabClicked'
-				}
-				else if(dualWAN_support && based_modelid != "BRT-AC828" && current_url.indexOf("Advanced_Modem_Content") == 0){
-					tab_code += (j == 0 || j == 3) ? 'tabClicked' : 'tab';	// Show fist tab css as class 'tabClicked'
 				}
 				else if(current_url.indexOf("Advanced_VLAN_Profile_Content") == 0){
 					tab_code += (j == 7) ? 'tabClicked' : 'tab';	// Show 7th tab css as class 'tabClicked'
