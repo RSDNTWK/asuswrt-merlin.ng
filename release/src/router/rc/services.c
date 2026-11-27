@@ -960,6 +960,7 @@ void create_passwd(void)
 					break;
 			}
 		}
+		free(nv);
 	}
 #endif
 
@@ -2186,8 +2187,9 @@ void start_dnsmasq(void)
 		/* DNS server */
 		value = nvram_conf_safe_get("ipv6_dns1_x");
 		value2 = nvram_conf_safe_get("ipv6_dns2_x");
-		const char *p = NULL, *p2 = NULL;
-		if ((*value && *(p = ipv6_address(value))) || (*value2 && *(p2 = ipv6_address(value2)))) {
+		const char *p = *value ? ipv6_address(value) : "";
+		const char *p2 = *value2 ? ipv6_address(value2) : "";
+		if (*p || *p2) {
 #if defined(RTCONFIG_IPV6) && (defined(RTAX82_XD6) || defined(RTAX82_XD6S) || defined(XD6_V2) || defined(ET12))
 			if (!strncmp(nvram_conf_safe_get("territory_code"), "CH", 2))
 				nvram_unset("ipv6_dns");
@@ -2470,7 +2472,7 @@ void start_stubby(void)
 #endif
 {
 	const static char *stubby_config = "/etc/stubby/stubby.yml";
-	const static char *stubby_log = NULL;
+	const char *stubby_log = NULL;
 	char *stubby_argv[] = { "/usr/sbin/stubby",
 		"-g", /* Run in background via _eval, and will not write /var/run/stubby.pid */
 		"-C", (char *)stubby_config,
@@ -4883,8 +4885,10 @@ void write_static_leases(FILE *fp)
 	strlcpy(lan_if, nvram_get("lan_ifname")? : nvram_default_get("lan_ifname"), sizeof(lan_if));
 	ip1 = inet_network(nvram_safe_get("lan_ipaddr"));
 	lan_mask = inet_network(nvram_safe_get("lan_netmask"));
-	if (ip1 == -1 || lan_mask == -1)
+	if (ip1 == -1 || lan_mask == -1) {
+		free(nv);
 		return;
+	}
 	lan_net = ip1 & lan_mask;
 
 #if defined(RTCONFIG_PORT_BASED_VLAN) || defined(RTCONFIG_TAGGED_BASED_VLAN)
@@ -5189,8 +5193,17 @@ start_ddns(char *caller, int isAidisk)
 		snprintf(user, sizeof(user), "%s", nvram_safe_get("ddns_hostname_x"));
 #endif
 	snprintf(host, sizeof(host), "%s", nvram_safe_get("ddns_hostname_x"));
-	if (!is_valid_domainname(ppp_safe_escape(host, escaped_host, sizeof(escaped_host)))) {
+	ppp_safe_escape(host, escaped_host, sizeof(escaped_host));
+	/* Custom and Oray DDNS don't require a hostname */
+	if ((*host || (strcmp(server, "CUSTOM") && strcmp(server, "WWW.ORAY.COM")))
+	    && !is_valid_domainname(escaped_host)) {
 		logmessage(log_title, "Invalid domain name!");
+		if (!isAidisk) {
+			/* Final error: don't let watchdog keep retrying */
+			nvram_unset("ddns_updated");
+			nvram_set("ddns_return_code", "unknown_error");
+			nvram_set("ddns_return_code_chk", "unknown_error");
+		}
 		return -1;
 	}
 
@@ -10457,6 +10470,7 @@ void chilli_config(void)
 		fprintf(fp, "localusers %s\n", "/tmp/localusers");
 		if (!(local_fp = fopen("/tmp/localusers", "w"))) {
 			perror("/tmp/localusers");
+			fclose(fp);
 			return;
 		}
 		fprintf(local_fp, "noauth:noauth");
@@ -17596,6 +17610,7 @@ script_allnet:
 #endif
 			if(nvram_match("dhcp_war", "1"))
 				dhcp_war();
+			setup_leds();
 		}
 	}
 	else if (strcmp(script, "net_and_phy") == 0) {
@@ -17934,6 +17949,7 @@ script_allnet:
 #endif
 			if(nvram_match("dhcp_war", "1"))
 				dhcp_war();
+			setup_leds();
 		}
 #ifdef RTCONFIG_MULTILAN_CFG
 		handle_sdn_feature(ALL_SDN, SDN_FEATURE_ALL, action);
@@ -24672,233 +24688,42 @@ int service_main(int argc, char *argv[])
 
 void setup_leds()
 {
-#ifndef RTCONFIG_SW_CTRL_ALLLED	// Currently only needed for GT-AXE11000, more may be added later
-	if (nvram_get_int("AllLED") == 0) {
+	int AllLED = !!nvram_get_int("AllLED");
+	int inhibit = inhibit_led_on();		/* Disabled, or LED schedule off period */
+	int changed = 1;
+
+#ifdef RTCONFIG_SW_CTRL_ALLLED
+	/* led_val holds the last applied state (also kept by the LED button and ctrl_led) */
+	changed = (AllLED != !!nvram_get_int("led_val"));
+#endif
+
+	/* Always (re)apply the off state: radio reconfiguration (wlconf) resets the
+	 * driver-controlled WiFi LEDs, and setAllLedOff() is safe to repeat (it only
+	 * saves the ledg/antled schemes while they are non-zero).  Only turn LEDs on
+	 * upon a state change: setAllLedNormal() resets the ledg/antled schemes on
+	 * some models, overriding a user-disabled Aura effect. */
+	if (inhibit)
 		setAllLedOff();
-#ifdef RTCONFIG_USB
-		stop_usbled();
-#endif
-	} else {
-		led_control(LED_POWER, LED_ON);
-#ifdef RTCONFIG_USB
-		start_usbled();
-#endif
-#ifdef RTCONFIG_LED_ALL
-		led_control(LED_ALL, LED_ON);
-#endif
-
-
-/* WAN/LAN */
-#if defined(RTAC3200) || defined(RTCONFIG_BCM_7114)
-		eval("et", "-i", "eth0", "robowr", "0", "0x18", "0x01ff");
-		eval("et", "-i", "eth0", "robowr", "0", "0x1a", "0x01ff");
-#elif defined(HND_ROUTER)
-#ifndef GTAC2900
-#if defined(RTAX58U_V2) || defined(GTAX6000) || defined(RTAX3000N) || defined(RTAX82U_V2) || defined(TUFAX5400_V2) || defined(RTAX5400) || defined(RTAX88U_PRO)
-		wan_phy_led_pinmux(0);
-#else
-		led_control(LED_WAN_NORMAL, LED_ON);
-#endif
-#endif
-#if defined(RTAX88U_PRO)
-		lan_phy_led_pinmux(0);
-#endif
-		setLANLedOn();
-#else
-		eval("et", "robowr", "0", "0x18", "0x01ff");
-		eval("et", "robowr", "0", "0x1a", "0x01ff");
-#endif
-
-#ifdef RTCONFIG_EXTPHY_BCM84880
-#if defined(RTAX86U) || defined(GTAX11000) || defined(GTAX6000)
-		int ext_phy_model = nvram_get_int("ext_phy_model");
-
-		if(!strcmp(get_productid(), "RT-AX86S")) ;
-		else if(ext_phy_model == EXT_PHY_GPY211)
-				eval("ethctl", "phy", "ext", EXTPHY_GPY_ADDR_STR, "0x1e0001", "0x3f0");
-		else if(ext_phy_model == EXT_PHY_RTL8226)
-			eval("ethctl", "phy", "ext", EXTPHY_RTL_ADDR_STR, "0x1fd032", "0x0027");        // RTL LCR2 LED Control Reg
-		else if(ext_phy_model == EXT_PHY_BCM54991){
-			eval("ethctl", "phy", "ext", EXTPHY_ADDR_STR, "0x1a832", "0x6");        // default. CTL LED3 MASK LOW
-			eval("ethctl", "phy", "ext", EXTPHY_ADDR_STR, "0x1a835", "0x40");       // default. CTL LED4 MASK LOW
-		}
-#endif
-#endif
-
-#ifdef RTCONFIG_LAN4WAN_LED
-		LanWanLedCtrl();
-#endif
-#ifdef RTAC87U
-		qcsapi_wifi_run_script("router_command.sh", "lan4_led_ctrl on");
-#endif
-
-		kill_pidfile_s("/var/run/wanduck.pid", SIGUSR2);
-
-
-/* Wifi */
-		if (nvram_match("wl0_radio", "1")) {
-#ifdef RTAC68U
-			eval("wl", "ledbh", "10", "7");
-#elif defined(RTAC3200)
-			eval("wl", "-i", "eth2", "ledbh", "10", "7");
-#elif defined(RTCONFIG_BCM_7114) || defined(RTAC86U)
-			eval("wl", "ledbh", "9", "7");
-#elif defined(RTAX88U) || defined(GTAX11000)
-			eval("wl", "-i", "eth6", "ledbh", "15", "7");
-#elif defined(RTAX58U) || defined(RTAX56U)
-			eval("wl", "-i", "eth5", "ledbh", "0", "25");
-#elif defined(RTAX86U)
-			if(!strcmp(get_productid(), "RT-AX86S"))
-				eval("wl", "-i", "eth5", "ledbh", "7", "7");
-			else
-				eval("wl", "-i", "eth6", "ledbh", "7", "7");
-#elif defined(RTAX68U)
-			eval("wl", "-i", "eth5", "ledbh", "7", "7");
-#elif defined(RTAC68U_V4)
-			eval("wl", "-i", "eth5", "ledbh", "10", "7");
-#elif defined(GTAC2900)
-			eval("wl", "ledbh", "9", "1");
-#elif defined(GTAXE11000)
-			eval("wl", "-i", "eth6", "ledbh", "9", "7");
-#elif defined(GTAX6000)
-			eval("wl", "-i", "eth6", "ledbh", "13", "7");
-#elif defined(GTAXE16000)
-			eval("wl", "-i", "eth7", "ledbh", "13", "7");
-#elif defined(GTAX11000_PRO)
-			eval("wl", "-i", "eth6", "ledbh", "13", "7");
-#endif
-		}
-
-		if (nvram_match("wl1_radio", "1")) {
-#ifdef RTAC68U
-			eval("wl", "-i", "eth2", "ledbh", "10", "7");
-#elif defined(RTAC3200)
-			eval("wl", "ledbh", "10", "7");
-#elif defined(RTAC86U)
-			eval("wl", "-i", "eth6", "ledbh", "9", "7");
-#elif defined(GTAC2900)
-			eval("wl", "-i", "eth6", "ledbh", "9", "1");
-#elif defined(RTCONFIG_BCM_7114)
-			eval("wl", "-i", "eth2", "ledbh", "9", "7");
-#elif defined(RTAC87U)
-			qcsapi_wifi_run_script("router_command.sh", "wifi_led_on");
-			qcsapi_led_set(1, 1);
-#elif defined(RTAX88U) || defined(RTAX86U) || defined(GTAX11000)
-			if(!strcmp(get_productid(), "RT-AX86S"))
-				eval("wl", "-i", "eth6", "ledbh", "15", "7");
-			else
-				eval("wl", "-i", "eth7", "ledbh", "15", "7");
-#elif defined(RTAX68U)
-			eval("wl", "-i", "eth6", "ledbh", "7", "7");
-#elif defined(RTAC68U_V4)
-			eval("wl", "-i", "eth6", "ledbh", "10", "7");
-#elif defined(RTAX58U)
-			eval("wl", "-i", "eth6", "ledbh", "15", "7");
-#elif defined(RTAX56U)
-			eval("wl", "-i", "eth6", "ledbh", "0", "25");
-#elif defined(GTAXE11000)
-			eval("wl", "-i", "eth7", "ledbh", "9", "7");
-#elif defined(GTAX6000)
-			eval("wl", "-i", "eth7", "ledbh", "13", "7");
-#elif defined(GTAXE16000)
-			eval("wl", "-i", "eth8", "ledbh", "13", "7");
-#elif defined(GTAX11000_PRO)
-			eval("wl", "-i", "eth7", "ledbh", "13", "7");
-#endif
-		}
-
-#if defined(RTAC3200) || defined(RTCONFIG_HAS_5G_2)
-		if (nvram_match("wl2_radio", "1")) {
-#if defined(RTAC3200)
-			eval("wl", "-i", "eth3", "ledbh", "10", "7");
-#elif defined(RTAC5300)
-			eval("wl", "-i", "eth3", "ledbh", "9", "7");
-#elif defined(GTAX11000)
-			eval("wl", "-i", "eth8", "ledbh", "15", "7");
-#elif defined(GTAXE11000)
-			eval("wl", "-i", "eth8", "ledbh", "9", "7");
-#elif defined(GTAXE16000)
-			eval("wl", "-i", "eth9", "ledbh", "13", "7");
-#elif defined(GTAX11000_PRO)
-			eval("wl", "-i", "eth8", "ledbh", "13", "7");
-#endif
-		}
-#endif
-
-#ifdef RTCONFIG_QUADBAND
-		if (nvram_match("wl3_radio", "1")) {
-#if defined(GTAXE16000)
-			eval("wl", "-i", "eth10", "ledbh", "13", "7");
-#endif
-			stop_upnp();
-			start_upnp();
-		}
-#endif
-
-#if defined(GTBE98) || defined(GTBE98_PRO)
-		eval("wl", "-i", nvram_safe_get("wl0_ifname"), "ledbh", "12", "7");
-		eval("wl", "-i", nvram_safe_get("wl1_ifname"), "ledbh", "12", "7");
-		eval("wl", "-i", nvram_safe_get("wl2_ifname"), "ledbh", "12", "7");
-		eval("wl", "-i", nvram_safe_get("wl3_ifname"), "ledbh", "12", "7");
-#endif
-
-#if defined(GTBE96) || defined(RTBE96U)
-		eval("wl", "-i", nvram_safe_get("wl0_ifname"), "ledbh", "12", "7");
-		eval("wl", "-i", nvram_safe_get("wl1_ifname"), "ledbh", "12", "7");
-		eval("wl", "-i", nvram_safe_get("wl2_ifname"), "ledbh", "12", "7");
-#endif
-
-#if defined(RTBE88U)
-		eval("wl", "-i", nvram_safe_get("wl0_ifname"), "ledbh", "12", "7");
-		eval("wl", "-i", nvram_safe_get("wl1_ifname"), "ledbh", "12", "7");
-#endif
-
-#if defined(RTBE86U)
-		eval("wl", "-i", nvram_safe_get(wl_nvname("ifname", 0, 0)), "ledbh", "7", "7");
-		eval("wl", "-i", nvram_safe_get(wl_nvname("ifname", 1, 0)), "ledbh", "12", "7");
-#endif
-
-#ifdef RTCONFIG_LOGO_LED
-		led_control(LED_LOGO, LED_ON);
-#endif
-
-#if defined(RTAX82U) || defined(GTAX11000_PRO) || defined(GTAXE16000) || defined(GTAX6000)
-		kill_pidfile_s("/var/run/ledg.pid", SIGTSTP);
-#endif
-#if defined(XT12) || defined(ET12)
-		bcm_cled_ctrl_single_white(BCM_CLED_WHITE, BCM_CLED_STEADY_NOBLINK);
-#endif
-
-#ifdef GTAX6000
-		AntennaGroupReset(LED_ON);
-		setAntennaGroupOn();
-		eval("sw", "0xff803140", "0x0000e002", "0x00c34a24", "0x00000a24", "0x00800080");
-		eval("sw", "0xff80301c", "0x00040000");
-		eval("sw", "0xff803150", "0x0000e002", "0x00c34a24", "0x00000a24", "0x00800080");
-		eval("sw", "0xff80301c", "0x00080000");
-		eval("sw", "0xff803160", "0x0000e002", "0x00c34a24", "0x00000a24", "0x00800080");
-		eval("sw", "0xff80301c", "0x00100000");
-		eval("sw", "0xff803170", "0x0000e002", "0x00c34a24", "0x00000a24", "0x00800080");
-		eval("sw", "0xff80301c", "0x00200000");
-
-		start_ledg();
-		start_antled();
-#endif
-#if defined(GTAX11000_PRO) || defined(GTAXE16000) || defined(GTBE98) || defined(GTBE98_PRO) || defined(GTBE96)
-		start_ledg();
-#endif
-	}
-
-#else 	// RTCONFIG_SW_CTRL_ALLLED
-	if (nvram_get_int("AllLED") == 0)
-		setAllLedOff();
-	else
+	else if (changed)
 		setAllLedNormal();
-#endif	// RTCONFIG_SW_CTRL_ALLLED
 
+#ifdef RTCONFIG_SW_CTRL_ALLLED
+	if (changed) {
+		nvram_set_int("led_val", AllLED);
+		nvram_commit();
+	}
+#endif
 
 #if defined(RTCONFIG_RGBLED)
-	start_aurargb();
+	if (inhibit || changed)
+		start_aurargb();
+#endif
+
+#ifdef RTCONFIG_HND_ROUTER_AX
+	/* Have wanduck refresh the WAN error LED: setAllLedOff() turned it off,
+	 * or led_wan_err may have just changed */
+	if (inhibit)
+		kill_pidfile_s("/var/run/wanduck.pid", SIGUSR2);
 #endif
 }
 
@@ -27277,7 +27102,7 @@ static void server_handler(int sock)
 	ret = select(sock+1, &rmask, NULL, NULL, &select_timeout);
 	if (ret > 0) {
 		FILE *fp;
-		char *buf;
+		char *buf = NULL;
 		int read_len = 0, tmp_len, buf_len;
 		len = read(sock, cmd, sizeof(cmd)-1);
 		if (len > 0) {
@@ -27289,11 +27114,14 @@ static void server_handler(int sock)
 				read_len = buf_len = 0;
 				while (1) {
 					buf_len += STEP_BUF_SIZE;
-					buf = (char *)realloc(buf, buf_len);
-					if (!buf) {
+					char *new_buf = (char *)realloc(buf, buf_len);
+					if (!new_buf) {
+						free(buf);
+						buf = NULL;
 						read_len=0;
 						break;
 					}
+					buf = new_buf;
 					tmp_len = fread(buf+read_len, 1, STEP_BUF_SIZE, fp);
 					read_len += tmp_len;
 					if (tmp_len < STEP_BUF_SIZE)
@@ -27313,6 +27141,7 @@ static void server_handler(int sock)
 				cmd[0]='\0';
 				write(sock, cmd, 1);
 			}
+			free(buf);
 		}
 	}
 	close(sock);
@@ -27526,13 +27355,15 @@ int realip_main(int argc, char *argv[])
 
 		if (!ret) {
 			FILE *fp = fopen(STUN_RESULT, "r");
-			while (fgets(buf, sizeof(buf), fp)) {
+			while (fp && fgets(buf, sizeof(buf), fp)) {
 				trimNL(buf);
 				if (is_valid_ip4(buf)) {
 					success = 1;
 					break;
 				}
 			}
+			if (fp)
+				fclose(fp);
 
 			if (success) {
 				printf("%s\n", buf);

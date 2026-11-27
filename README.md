@@ -1,19 +1,26 @@
-asuswrt-merlin New Gen (version 382.xx and higher)
-==================================================
+# Asuswrt-Merlin firmware
+### About
+Asuswrt-Merlin is a third party firmware based on Asuswrt, the firmware used by Asus's routers.  Its main goal is to enhance the original firmware, while retaining the majority of the original features. This is the main development repository.
 
-#### Support is available via the forums at [SNBForums](https://www.snbforums.com/forums/asuswrt-merlin.42/).
 
-Asuswrt-Merlin is an enhanced version of Asuswrt, the firmware used by Asus's modern routers.
+### Latest releases
+![GitHub release](https://img.shields.io/github/tag/RMerl/asuswrt-merlin.ng.svg?filter=*3004*) ![GitHub release](https://img.shields.io/github/tag/RMerl/asuswrt-merlin.ng.svg?filter=*3006*)
 
-The goal of this project is to fix issues and bring some minor functionality adjustments to the 
-original Asus firmware.  While some features do get added, this is not the main focus of this project.  
-It is not meant to replace existing projects such as Tomato or DD-WRT, but rather to offer an alternative 
-for people who prefer the original firmware featureset.
 
-This is the new development branch, originally based on Asus's 
-3.0.0.4.382_xxxx firmware release.  Development of the 380.xx 
-legacy branch has been dropped.
+### Project website
+https://www.asuswrt-merlin.net/
 
-Please consult the Wiki for an up-to-date list of supported models:
 
+### Downloads
+![SourceForge Downloads](https://img.shields.io/sourceforge/dw/asuswrt-merlin?logo=sourceforge)
+ ![SourceForge Downloads](https://img.shields.io/sourceforge/dm/asuswrt-merlin?logo=sourceforge) ![SourceForge Downloads](https://img.shields.io/sourceforge/dt/asuswrt-merlin?label=Total&logo=sourceforge)
+
+https://www.asuswrt-merlin.net/download
+
+
+### Documentation
 https://github.com/Asuswrt-Merlin/asuswrt-merlin.ng/wiki/Supported-Devices
+
+
+### Technical support
+Please visit the forums at [SNBForums](https://www.snbforums.com/forums/asuswrt-merlin.42/).

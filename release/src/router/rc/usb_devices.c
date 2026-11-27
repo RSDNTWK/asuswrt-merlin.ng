@@ -2860,6 +2860,7 @@ hotplug_block(void)
 
         if (!retry) {
                 hotplug_dbg("Failed locking LOCK_FILE: %s\n", strerror(errno));
+                close(lock_fd);
                 return -1;
         }
 

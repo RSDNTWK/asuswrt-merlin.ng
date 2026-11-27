@@ -2,6 +2,10 @@ Asuswrt-Merlin 3006.xxx Changelog
 =================================
 
 3006.102.10 (xx-xxx-2026)
+  - NEW: Option to have the WAN LED still turn up red when LEDs
+         are disabled (for models supporting dual coloured
+         WAN LED). The settings is on the System page.
+  - NEW: Added non-ROG build for the GT-BE19000AI (experimental)
   - UPDATED: Merged with GPL 102_40563 for the RT-BE92U, which
              includes a move to BCM SDK 6.2.0.  That means newer
              Linux kernel, and a switch from TrendMicro's BWDPI
@@ -9,11 +13,21 @@ Asuswrt-Merlin 3006.xxx Changelog
   - UPDATED: Merged with GPL 102_39302 for the RT-BE58_GO.
   - UPDATED: Merged with GPL 102_40771 for the GT-BE19000AI.
   - UPDATED: Merged with GPL 102_40585 for other wifi 7 models.
+  - UPDATED: Merged with GPL 102_37900 for Wifi 6 models.
   - UPDATED: OpenSSL to 3.5.9.
   - UPDATED: OpenVPN to 2.7.9.
   - UPDATED: haveged to 1.9.27.
-  - CHANGED: Removed emSign ECC Root CA - G3 signing cert
-             from the CA bundle.
+  - UPDATED: Updated Tor to 0.4.9.17
+  - UPDATED: CA bundle (removing the emSign signing certs)
+  - UPDATED: zlib to 1.3.2 (ported from 388_25817)
+  - CHANGED: Various theme-awareness improvements to the
+             UI4 pages (GT-BE19000AI)
+  - CHANGED: Don't report "no DDNS change" on every IPv6
+             refresh/update unless ddns_debug
+  - CHANGED: Stop logging acsd (Auto Channel Selection Daemon)
+             activity to syslog by default.
+  - CHANGED: Now by default when saving your settings, the Asus
+             DDNS will be included, unless you un-tick the box.
   - FIXED: Various issues with Dual WAN failover/failback,
            and DNS probing (TheUnboundDeveloper/Claude)
   - FIXED: Various issues with the "Internet is down"
@@ -27,7 +41,24 @@ Asuswrt-Merlin 3006.xxx Changelog
            certificate. (Claude)
   - FIXED: VPN Director rules would be lost when one WAN
            went down in Dual WAN Load Balance mode. (Claude)
-  - FIXED: CVE-2026-98432 in kernel 4.19 and 5.15.
+  - FIXED: Namecheap DDNS could update the wrong IP when under
+           Dual WAN (Alex Iordanescu/Claude)
+  - FIXED: Wrong FQDN used with Namecheap (Alex Iordanescu/Claude)
+  - FIXED: Webui code injection through malicious UPnP
+           comment (andrewfader)
+  - FIXED: httpd could crash on malformed AiMesh data file (chrisfu)
+  - FIXED: CVE-2026-98432 and CVE-2026-99288 in kernel 4.19 and 5.15.
+  - FIXED: Various memory leaks, mostly in error handling paths
+           (Prashant/Claude)
+  - FIXED: RGB logo would always re-enable when making changes to
+           System page. (Claude)
+  - FIXED: Navigating back to legacy VPN protocols pages would fail
+           loading the page properly on GT-BE19000AI. (Claude)
+  - FIXED: sshd_ variables not getting restored when loading
+           a saved config (new "security measure" in closed
+           source code interfering). Worked around it. (Claude)
+  - FIXED: Don't loop retry registering DDNS if the hostname is
+           missing (Claude)
 
 
 3006.102.9 (23-Sept-2026)

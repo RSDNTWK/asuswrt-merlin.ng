@@ -3042,6 +3042,10 @@ define RouterOptions
 			echo "# RTCONFIG_SDN_PRIORITY is not set" >> $(1); \
 		fi; \
 	fi;
+	if [ "$(SDN_PRIORITY)" = "y" ]; then \
+		sed -i "/RTCONFIG_SDN_PRIORITY/d" $(1); \
+		echo "RTCONFIG_SDN_PRIORITY=y" >>$(1); \
+	fi;
 	if [ "$(TUF_UI)" = "y" ]; then \
 		sed -i "/RTCONFIG_TUF_UI/d" $(1); \
 		echo "RTCONFIG_TUF_UI=y" >>$(1); \

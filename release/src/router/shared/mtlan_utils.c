@@ -1282,6 +1282,7 @@ char *match_vif_from_rulelist(size_t *sz, int v_id)
 		
 		if((atoi(vid) == v_id) && ifname && *ifname){
 			strlcpy(res , ifname, sizeof(res ));	
+			free(nv);
 			return res;
 		}
 

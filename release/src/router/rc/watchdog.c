@@ -6517,7 +6517,6 @@ unsigned long get_etwan_count()
 	unsigned long tmpcnt=0;
 	unsigned long counter=0;
 
-	if ((f = fopen("/proc/net/dev", "r")) == NULL) return -1;
 #if defined(RTBE58U) || defined(TUFBE3600) || defined(RTBE58U_V2) || defined(TUFBE3600_V2) || defined(RTBE92U) || defined(GT7)
 	if (!nvram_match("wan_ifname", "vlan4094")) return -1;
 #elif defined(GS7_PRO_MAX)
@@ -6525,6 +6524,7 @@ unsigned long get_etwan_count()
 	    !nvram_match("wan_ifname", "vlan4094"))
 		return -1;
 #endif
+	if ((f = fopen("/proc/net/dev", "r")) == NULL) return -1;
 
 	fgets(buf, sizeof(buf), f);
 	fgets(buf, sizeof(buf), f);
@@ -7930,6 +7930,11 @@ void ddns_check(void)
 
 	//_dprintf("ddns_check... %d\n", ddns_check_count);
 	if (!nvram_get_int("ddns_enable_x"))
+		return;
+
+	/* No point retrying without a hostname (Custom and Oray don't need one) */
+	if (nvram_match("ddns_hostname_x", "") &&
+	    !nvram_match("ddns_server_x", "CUSTOM") && !nvram_match("ddns_server_x", "WWW.ORAY.COM"))
 		return;
 
 #if defined(RTCONFIG_DUALWAN)

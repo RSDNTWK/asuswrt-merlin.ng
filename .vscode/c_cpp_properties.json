@@ -3,17 +3,12 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/release/src/router/**"
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "${workspaceFolder}/**"
-                ],
-                "exclude": [
-                    "${workspaceFolder}/dev/amng/release/**/kernel-4.1/**",
-                    "${workspaceFolder}/dev/amng/release/**/kernel-4.19/**",
-                    "${workspaceFolder}/dev/amng/release/**/bcmdrivers/**"
+                    "${workspaceFolder}/release/src/router"
                 ]
             }
         }

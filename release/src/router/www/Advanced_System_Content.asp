@@ -594,6 +594,10 @@ function initial(){
 		$("#pincode").parent().parent().show();
 	}
 
+	/* Models with a red WAN LED */
+	if ("<% nvram_get("led_wan_gpio"); %>" != "" && "<% nvram_get("led_wan_err"); %>" != "")
+		document.getElementById("led_wan_err_tr").style.display = "";
+
 	if (boostKey_support) {
 		document.getElementById("boostkey_tr").style.display = "";
 
@@ -2883,6 +2887,13 @@ function Get_Component_reboot_schedule_ui(config){
 					<td>
 						<input type="radio" name="AllLED" value="1" <% nvram_match_x("", "AllLED", "1", "checked"); %>><#checkbox_Yes#>
 						<input type="radio" name="AllLED" value="0" <% nvram_match_x("", "AllLED", "0", "checked"); %>><#checkbox_No#>
+					</td>
+				</tr>
+				<tr id="led_wan_err_tr" style="display:none;">
+					<th>Show WAN errors (red WAN LED) when LEDs are disabled</th>
+					<td>
+						<input type="radio" name="led_wan_err" value="1" <% nvram_match_x("", "led_wan_err", "1", "checked"); %>><#checkbox_Yes#>
+						<input type="radio" name="led_wan_err" value="0" <% nvram_match_x("", "led_wan_err", "0", "checked"); %>><#checkbox_No#>
 					</td>
 				</tr>
 

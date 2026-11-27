@@ -1110,6 +1110,7 @@ int do_led_control(int which, int mode)
 #if defined(RTBE86U) || defined(RTBE92U) || defined(RTBE58U) || defined(TUFBE3600) || defined(RTBE58U_V2) || defined(TUFBE3600_V2) || defined(RTBE55) || defined(RTBE82U) || defined(TUFBE82) || defined(RTBE58U_PRO) || defined(RTCONFIG_MXL_826XX)
 	if (nvram_match("AllLED", "0") && nvram_match("asus_mfg", "0") && (mode == LED_ON)
 		&& (which != PWR_USB)
+		&& !(which == LED_WAN && nvram_match("led_wan_err", "1"))	// wanduck WAN error LED
 #if defined(GTBE19000AI) || defined(GSBE18000) || defined(GS7_PRO) || defined(GTBE96_AI)
 		&& (which != ES_RESET)
 		&& (which != ES_SOP0)

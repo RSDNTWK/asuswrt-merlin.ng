@@ -3387,6 +3387,7 @@ CONFIG_BLOG_L2TP=y
 # CONFIG_BCM_OVS is not set
 CONFIG_BCM_PSCI=y
 # CONFIG_BCM_SELECTIVE_PHYS is not set
+# CONFIG_BCM_PHY_COMBO is not set
 
 #
 # Autodetected Drivers

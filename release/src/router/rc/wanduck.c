@@ -225,6 +225,33 @@ int update_wan_led_and_wanred_led(int wan_unit) { return 0; }
 #endif	// !RTCONFIG_RALINK
 #endif	/* RTCONFIG_WANRED_LED */
 
+#ifdef RTCONFIG_HND_ROUTER_AX
+/* Show WAN errors on the red WAN LED while LEDs are disabled (led_wan_err).
+ * The prebuilt update_wan_leds() does nothing when AllLED=0, so drive LED_WAN
+ * ourselves with the same rule: red unless set up and connected.  White stays
+ * off, so on recovery the LED just goes dark. */
+static int wan_err_led = -1;	/* -1: not driving it, otherwise last state applied */
+
+static void update_wan_err_led(int force)
+{
+	int want = -1;
+
+	if (nvram_get_int("led_wan_err") && inhibit_led_on() && is_router_mode()
+	    && nvram_invmatch("led_wan_gpio", ""))
+		want = !(nvram_get_int("x_Setting") && nvram_get_int("link_internet") == 2);
+
+	if (want == wan_err_led && !force)
+		return;
+
+	if (want >= 0)
+		led_control(LED_WAN, want ? LED_ON : LED_OFF);
+	else if (wan_err_led == 1 && inhibit_led_on())
+		led_control(LED_WAN, LED_OFF);	/* Option disabled while showing red */
+
+	wan_err_led = want;
+}
+#endif
+
 void set_link_internet(int wan_unit, int link_internet){
 #if !defined(RTCONFIG_WANLEDX2)
 	if(nvram_get_int("link_internet") == link_internet){
@@ -237,6 +264,9 @@ void set_link_internet(int wan_unit, int link_internet){
 
 #if defined(RTCONFIG_HND_ROUTER_AX) || defined(RTCONFIG_LANWAN_LED) || defined(RTCONFIG_WANRED_LED) || defined(RTCONFIG_FAILOVER_LED)
 	update_wan_leds(wan_unit, link_wan[wan_unit]);
+#endif
+#ifdef RTCONFIG_HND_ROUTER_AX
+	update_wan_err_led(0);
 #endif
 #ifdef DSL_AC68U
 	if (nvram_match("AllLED", "1")) {
@@ -404,6 +434,9 @@ static void wan_led_control(int sig) {
 
 		update_wan_leds(unit, !rule_setup);
 	}
+
+	/* Also sent after LEDs get turned off or led_wan_err changes */
+	update_wan_err_led(1);
 #elif defined(RTAC68U) ||  defined(RTAC87U) || defined(RTAC3200) || defined(RTCONFIG_BCM_7114) || defined(DSL_AC68U) || defined(HND_ROUTER) || defined(RTAX53U) || defined(RT4GAX56) || defined(RTAX54) || defined(XD4S)
 	if(nvram_match("AllLED", "1")
 #ifdef RTAC68U
@@ -3917,6 +3950,11 @@ _dprintf("wanduck(%d)(first detect   end): state %d, state_old %d, changed %d, w
 		tval.tv_usec = 0;
 
 		get_related_nvram();		
+
+#ifdef RTCONFIG_HND_ROUTER_AX
+		/* Catch LED state changes made without notifying us (LED schedule, LED button) */
+		update_wan_err_led(0);
+#endif
 
 		// Sam 2014/10/14
 		// rule_setup depend on wan status,
